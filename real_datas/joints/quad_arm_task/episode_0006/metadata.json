@@ -1,0 +1,123 @@
+{
+  "episode_id": "episode_0006",
+  "trigger_start_time": {
+    "sec": 1764143686,
+    "nanosec": 788964271
+  },
+  "trigger_end_time": {
+    "sec": 1764143708,
+    "nanosec": 827309608
+  },
+  "duration_sec": 22.038345336914062,
+  "arms": {
+    "left_slave": {
+      "namespace": "PZ51C02530000709",
+      "topic": "/PZ51C02530000709/joint_states",
+      "total_frames": 5511,
+      "first_msg_time": {
+        "sec": 1764143686,
+        "nanosec": 785848720
+      },
+      "last_msg_time": {
+        "sec": 1764143708,
+        "nanosec": 825949580
+      },
+      "avg_frequency_hz": 250.04422562151998,
+      "file": "left_slave.parquet",
+      "joints_detected": [
+        "eef_gripper_joint",
+        "gripper_mapping_controller",
+        "joint1",
+        "joint2",
+        "joint3",
+        "joint4",
+        "joint5",
+        "joint6"
+      ]
+    },
+    "right_slave": {
+      "namespace": "PZ51C02521000637",
+      "topic": "/PZ51C02521000637/joint_states",
+      "total_frames": 5509,
+      "first_msg_time": {
+        "sec": 1764143686,
+        "nanosec": 791409898
+      },
+      "last_msg_time": {
+        "sec": 1764143708,
+        "nanosec": 823501186
+      },
+      "avg_frequency_hz": 250.04435415626187,
+      "file": "right_slave.parquet",
+      "joints_detected": [
+        "eef_gripper_joint",
+        "gripper_mapping_controller",
+        "joint1",
+        "joint2",
+        "joint3",
+        "joint4",
+        "joint5",
+        "joint6"
+      ]
+    },
+    "right_master": {
+      "namespace": "PZ51C02521000629",
+      "topic": "/PZ51C02521000629/joint_states",
+      "total_frames": 5507,
+      "first_msg_time": {
+        "sec": 1764143686,
+        "nanosec": 801421408
+      },
+      "last_msg_time": {
+        "sec": 1764143708,
+        "nanosec": 825422439
+      },
+      "avg_frequency_hz": 250.04539227973314,
+      "file": "right_master.parquet",
+      "joints_detected": [
+        "eef_gripper_joint",
+        "gripper_mapping_controller",
+        "joint1",
+        "joint2",
+        "joint3",
+        "joint4",
+        "joint5",
+        "joint6"
+      ]
+    },
+    "left_master": {
+      "namespace": "PZ51C02521000583",
+      "topic": "/PZ51C02521000583/joint_states",
+      "total_frames": 5506,
+      "first_msg_time": {
+        "sec": 1764143686,
+        "nanosec": 805527193
+      },
+      "last_msg_time": {
+        "sec": 1764143708,
+        "nanosec": 825559259
+      },
+      "avg_frequency_hz": 250.04504798784055,
+      "file": "left_master.parquet",
+      "joints_detected": [
+        "eef_gripper_joint",
+        "gripper_mapping_controller",
+        "joint1",
+        "joint2",
+        "joint3",
+        "joint4",
+        "joint5",
+        "joint6"
+      ]
+    }
+  },
+  "validation": {
+    "status": "passed",
+    "timestamp_monotonic": true,
+    "max_frame_count_diff": 5,
+    "warnings": [
+      "right_master: High NaN ratio (7.69%)",
+      "left_master: High NaN ratio (7.69%)"
+    ]
+  }
+}

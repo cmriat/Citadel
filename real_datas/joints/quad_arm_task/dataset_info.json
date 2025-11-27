@@ -1,0 +1,214 @@
+{
+  "task_name": "quad_arm_task",
+  "created_at": "2025-11-26T07:47:19.863059+00:00",
+  "total_episodes": 6,
+  "collection_mode": "all_messages",
+  "arms_config": {
+    "right_slave": {
+      "namespace": "PZ51C02521000637",
+      "joints": [
+        "joint1",
+        "joint2",
+        "joint3",
+        "joint4",
+        "joint5",
+        "joint6",
+        "eef_gripper_joint",
+        "gripper_mapping_controller"
+      ],
+      "enabled": true
+    },
+    "right_master": {
+      "namespace": "PZ51C02521000629",
+      "joints": [
+        "joint1",
+        "joint2",
+        "joint3",
+        "joint4",
+        "joint5",
+        "joint6",
+        "eef_gripper_joint",
+        "gripper_mapping_controller"
+      ],
+      "enabled": true
+    },
+    "left_slave": {
+      "namespace": "PZ51C02530000709",
+      "joints": [
+        "joint1",
+        "joint2",
+        "joint3",
+        "joint4",
+        "joint5",
+        "joint6",
+        "eef_gripper_joint",
+        "gripper_mapping_controller"
+      ],
+      "enabled": true
+    },
+    "left_master": {
+      "namespace": "PZ51C02521000583",
+      "joints": [
+        "joint1",
+        "joint2",
+        "joint3",
+        "joint4",
+        "joint5",
+        "joint6",
+        "eef_gripper_joint",
+        "gripper_mapping_controller"
+      ],
+      "enabled": true
+    }
+  },
+  "expected_joints": [
+    "joint1",
+    "joint2",
+    "joint3",
+    "joint4",
+    "joint5",
+    "joint6",
+    "eef_gripper_joint",
+    "gripper_mapping_controller",
+    "joint1",
+    "joint2",
+    "joint3",
+    "joint4",
+    "joint5",
+    "joint6",
+    "eef_gripper_joint",
+    "gripper_mapping_controller",
+    "joint1",
+    "joint2",
+    "joint3",
+    "joint4",
+    "joint5",
+    "joint6",
+    "eef_gripper_joint",
+    "gripper_mapping_controller",
+    "joint1",
+    "joint2",
+    "joint3",
+    "joint4",
+    "joint5",
+    "joint6",
+    "eef_gripper_joint",
+    "gripper_mapping_controller"
+  ],
+  "episodes": [
+    {
+      "episode_id": "episode_0001",
+      "trigger_start_time": {
+        "sec": 1764143235,
+        "nanosec": 475324392
+      },
+      "trigger_end_time": {
+        "sec": 1764143239,
+        "nanosec": 780409336
+      },
+      "duration_sec": 4.305084943771362,
+      "frame_counts": {
+        "right_slave": 1076,
+        "right_master": 1076,
+        "left_slave": 1076,
+        "left_master": 1076
+      },
+      "validation_status": "passed"
+    },
+    {
+      "episode_id": "episode_0002",
+      "trigger_start_time": {
+        "sec": 1764143365,
+        "nanosec": 624264240
+      },
+      "trigger_end_time": {
+        "sec": 1764143374,
+        "nanosec": 162757158
+      },
+      "duration_sec": 8.538492918014526,
+      "frame_counts": {
+        "right_slave": 2135,
+        "right_master": 2135,
+        "left_slave": 2134,
+        "left_master": 2134
+      },
+      "validation_status": "passed"
+    },
+    {
+      "episode_id": "episode_0003",
+      "trigger_start_time": {
+        "sec": 1764143387,
+        "nanosec": 53238868
+      },
+      "trigger_end_time": {
+        "sec": 1764143402,
+        "nanosec": 231275796
+      },
+      "duration_sec": 15.17803692817688,
+      "frame_counts": {
+        "right_slave": 3795,
+        "right_master": 3794,
+        "left_slave": 3794,
+        "left_master": 3793
+      },
+      "validation_status": "passed"
+    },
+    {
+      "episode_id": "episode_0004",
+      "trigger_start_time": {
+        "sec": 1764143409,
+        "nanosec": 847999811
+      },
+      "trigger_end_time": {
+        "sec": 1764143420,
+        "nanosec": 946142435
+      },
+      "duration_sec": 11.098142623901367,
+      "frame_counts": {
+        "right_slave": 2776,
+        "right_master": 2774,
+        "left_slave": 2772,
+        "left_master": 2772
+      },
+      "validation_status": "passed"
+    },
+    {
+      "episode_id": "episode_0005",
+      "trigger_start_time": {
+        "sec": 1764143653,
+        "nanosec": 759898185
+      },
+      "trigger_end_time": {
+        "sec": 1764143675,
+        "nanosec": 268777132
+      },
+      "duration_sec": 21.50887894630432,
+      "frame_counts": {
+        "left_slave": 5377,
+        "right_slave": 5377,
+        "right_master": 5377,
+        "left_master": 5377
+      },
+      "validation_status": "passed"
+    },
+    {
+      "episode_id": "episode_0006",
+      "trigger_start_time": {
+        "sec": 1764143686,
+        "nanosec": 788964271
+      },
+      "trigger_end_time": {
+        "sec": 1764143708,
+        "nanosec": 827309608
+      },
+      "duration_sec": 22.038345336914062,
+      "frame_counts": {
+        "left_slave": 5511,
+        "right_slave": 5509,
+        "right_master": 5507,
+        "left_master": 5506
+      },
+      "validation_status": "passed"
+    }
+  ]
+}

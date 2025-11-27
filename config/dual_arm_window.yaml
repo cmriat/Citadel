@@ -1,0 +1,54 @@
+# LeRobot v2.1 Converter Configuration
+# Strategy: Time Window Aggregation (数据平滑，降噪)
+
+robot:
+  type: "dual_arm"
+  arms:
+    - name: "left_slave"
+      file: "left_slave.parquet"
+      role: "slave"
+    - name: "left_master"
+      file: "left_master.parquet"
+      role: "master"
+    - name: "right_slave"
+      file: "right_slave.parquet"
+      role: "slave"
+    - name: "right_master"
+      file: "right_master.parquet"
+      role: "master"
+  joints_per_arm: 7
+
+cameras:
+  - name: "cam_left"
+    role: "base"
+    target_fps: 25
+  - name: "cam_right"
+    role: "sync"
+    target_fps: 25
+  - name: "cam_head"
+    role: "downsample"
+    target_fps: 25
+
+input:
+  data_path: "/home/admin01/maoz/lerobot_convert/real_datas/joints/quad_arm_task"
+  images_path: "/home/admin01/maoz/lerobot_convert/real_datas/images/quad_arm_task"
+
+output:
+  base_path: "./lerobot_dataset_dual_window"
+  dataset_name: "airbot_play_dual_arm"
+
+alignment:
+  strategy: "window"        # 时间窗口平均策略
+  window_ms: 20             # 时间窗口大小 (±20ms)
+  aggregation: "mean"       # 聚合方法: mean | median
+  tolerance_ms: 20
+
+filtering:
+  min_duration_sec: 0.5
+  require_all_cameras: true
+
+video:
+  fps: 25
+  codec: "h264"
+  crf: 23
+  preset: "medium"

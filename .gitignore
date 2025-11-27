@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+.pixi/
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# LeRobot outputs
+lerobot_dataset*/
+*.parquet
+*.mp4
+
+# Logs
+*.log
+nohup.out
+
+# Redis
+*.rdb
+*.aof
+dump.rdb
+
+# SQLite
+*.db
+*.sqlite
+
+# Temporary files
+.DS_Store
+*.tmp
+*~
+
+# Task tracking
+.conversion_history.json
+tasks.db

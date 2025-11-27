@@ -1,0 +1,43 @@
+[project]
+name = "lerobot_converter"
+version = "0.1.0"
+description = "Convert airbot_play data to LeRobot v2.1 format with configurable alignment strategies"
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[dependencies]
+python = ">=3.10"
+numpy = ">=1.24.0"
+pandas = ">=2.0.0"
+pyarrow = ">=14.0.0"
+opencv = ">=4.8.0"
+pillow = ">=10.0.0"
+pyyaml = ">=6.0"
+tqdm = ">=4.65.0"
+
+[feature.dev.dependencies]
+pytest = ">=7.4.0"
+jupyterlab = ">=4.0.0"
+ipykernel = ">=6.25.0"
+ruff = ">=0.1.0"
+
+[tasks]
+# 三种对齐策略的快捷命令
+convert-nearest = "python scripts/convert.py --config config/dual_arm_nearest.yaml"
+convert-chunking = "python scripts/convert.py --config config/dual_arm_chunking.yaml"
+convert-window = "python scripts/convert.py --config config/dual_arm_window.yaml"
+
+# 通用转换命令
+convert = "python scripts/convert.py"
+
+# 测试命令
+test = "pytest tests/ -v"
+test-aligners = "pytest tests/test_aligners.py -v"
+
+# 开发工具
+lint = "ruff check lerobot_converter/"
+format = "ruff format lerobot_converter/"
+jupyter = "jupyter lab"
+
+# 验证输出
+verify = "python examples/verify_output.py"
