@@ -398,34 +398,65 @@ lerobot_convert/
 │   ├── dual_arm_nearest.yaml
 │   ├── dual_arm_window.yaml
 │   └── redis_config.yaml          # Redis 多数据源配置
-├── lerobot_converter/             # 核心代码
+│
+├── lerobot_converter/             # 核心代码（库模块）
+│   ├── core/                      # 核心业务抽象
+│   │   ├── __init__.py
+│   │   └── task.py                # ConversionTask 定义
+│   │
 │   ├── common/                    # 通用工具
 │   │   ├── io.py                  # 文件 I/O
 │   │   ├── timestamp.py           # 时间同步
 │   │   └── camera.py              # 相机同步
+│   │
 │   ├── aligners/                  # 对齐策略
 │   │   ├── base.py
 │   │   ├── nearest.py
 │   │   ├── chunking.py
 │   │   └── window.py
+│   │
 │   ├── writers/                   # 数据写入
 │   │   ├── parquet.py
 │   │   ├── video.py
 │   │   └── metadata.py
-│   └── pipeline/                  # 转换流程
-│       ├── config.py
-│       ├── cleaner.py
-│       └── converter.py
-├── scripts/
-│   ├── convert.py                 # CLI 入口（批量转换）
+│   │
+│   ├── pipeline/                  # 转换流程
+│   │   ├── config.py
+│   │   ├── cleaner.py
+│   │   └── converter.py
+│   │
+│   └── redis/                     # Redis 模块
+│       ├── __init__.py
+│       ├── client.py              # Redis 客户端封装
+│       ├── task_queue.py          # 任务队列管理
+│       ├── worker.py              # Worker 核心逻辑
+│       └── monitoring.py          # 监控功能
+│
+├── scripts/                       # CLI 入口
+│   ├── convert.py                 # 单机批量转换
 │   ├── redis_worker.py            # Redis Worker 服务
 │   ├── publish_task.py            # 任务发布工具
 │   └── monitor_redis.py           # 监控工具
+│
 ├── examples/
 │   └── verify_output.py           # 验证脚本
+│
 ├── pixi.toml                      # Pixi 配置
 └── README.md
 ```
+
+### 架构设计
+
+**分层架构：**
+- **core/** - 核心业务抽象（任务定义、策略枚举）
+- **redis/** - Redis 模块（解耦业务逻辑与 Redis 交互）
+- **scripts/** - CLI 入口层（仅负责参数解析和调用核心模块）
+
+**优点：**
+- ✅ Redis 逻辑与业务逻辑分离，易于测试
+- ✅ 核心模块可被其他程序导入使用
+- ✅ 便于扩展新的后端（Kubernetes、RabbitMQ 等）
+
 
 ## 常见问题
 

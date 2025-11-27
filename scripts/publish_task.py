@@ -1,102 +1,75 @@
 #!/usr/bin/env python3
 """任务发布工具 - 将 Episode 发布到 Redis 队列"""
 
-import redis
-import json
 import argparse
-import yaml
 import sys
 import os
 from pathlib import Path
-import time
 
+# 添加项目根目录到 Python 路径
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
 
-def load_redis_config(config_path: str = 'config/redis_config.yaml') -> dict:
-    """加载 Redis 配置"""
-    config_file = Path(config_path)
-    if not config_file.exists():
-        # 尝试从项目根目录查找
-        project_root = Path(__file__).parent.parent
-        config_file = project_root / config_path
-
-    with open(config_file, 'r') as f:
-        return yaml.safe_load(f)
+from lerobot_converter.core.task import ConversionTask, AlignmentStrategy
+from lerobot_converter.redis.client import RedisClient
+from lerobot_converter.redis.task_queue import TaskQueue
 
 
 def publish_episode(
     episode_id: str,
     source: str = None,
     strategy: str = None,
-    config_path: str = 'config/redis_config.yaml',
-    redis_host: str = None,
-    redis_port: int = None
-):
-    """
-    发布 Episode 转换任务到 Redis 队列
+    config_path: str = 'config/redis_config.yaml'
+) -> bool:
+    """发布 Episode 转换任务到 Redis 队列
 
     Args:
         episode_id: Episode ID (如 episode_0007)
         source: 数据源ID (如 robot_1)，默认从环境变量 ROBOT_ID 读取
         strategy: 对齐策略，默认从配置文件读取
         config_path: Redis 配置文件路径
-        redis_host: Redis 主机（覆盖配置文件）
-        redis_port: Redis 端口（覆盖配置文件）
 
     Returns:
         bool: 是否成功发布
     """
-    # 加载配置
-    config = load_redis_config(config_path)
-
-    # 获取数据源
-    if source is None:
-        source = os.environ.get('ROBOT_ID', 'robot_1')
-
-    # 获取策略
-    if strategy is None:
-        strategy = config['conversion']['strategy']
-
-    # Redis 连接参数
-    host = redis_host or config['redis']['host']
-    port = redis_port or config['redis']['port']
-    db = config['redis']['db']
-    password = config['redis'].get('password')
-    queue_name = config['redis']['queue_name']
-
     try:
-        # 连接 Redis
-        r = redis.Redis(
-            host=host,
-            port=port,
-            db=db,
-            password=password,
-            decode_responses=True
+        # 1. 初始化 Redis 客户端
+        redis_client = RedisClient(config_path)
+
+        if not redis_client.ping():
+            print(f"✗ Redis connection failed", file=sys.stderr)
+            return False
+
+        # 2. 获取数据源
+        if source is None:
+            source = os.environ.get('ROBOT_ID', 'robot_1')
+
+        # 3. 获取策略
+        if strategy is None:
+            strategy = redis_client.get_conversion_config()['strategy']
+
+        # 4. 创建任务
+        task = ConversionTask(
+            episode_id=episode_id,
+            source=source,
+            strategy=AlignmentStrategy(strategy)
         )
 
-        # 测试连接
-        r.ping()
+        # 5. 发布到队列
+        task_queue = TaskQueue(
+            redis_client.client,
+            redis_client.get_queue_name()
+        )
 
-        # 构造任务
-        task = {
-            'episode_id': episode_id,
-            'source': source,
-            'strategy': strategy,
-            'timestamp': time.time()
-        }
+        if task_queue.publish(task):
+            print(f"✓ Published: {source}/{episode_id} (strategy: {strategy})")
+            print(f"  Queue: {task_queue.queue_name}")
+            print(f"  Length: {task_queue.get_pending_count()}")
+            return True
+        else:
+            print(f"✗ Failed to publish task", file=sys.stderr)
+            return False
 
-        # 发布到队列
-        r.lpush(queue_name, json.dumps(task))
-
-        print(f"✓ Published: {source}/{episode_id} (strategy: {strategy})")
-        print(f"  Queue: {queue_name}")
-        print(f"  Length: {r.llen(queue_name)}")
-
-        return True
-
-    except redis.ConnectionError as e:
-        print(f"✗ Redis connection error: {e}", file=sys.stderr)
-        print(f"  Host: {host}:{port}", file=sys.stderr)
-        return False
     except Exception as e:
         print(f"✗ Error: {e}", file=sys.stderr)
         import traceback
@@ -122,9 +95,6 @@ def main():
 
   # 指定策略
   python scripts/publish_task.py --episode episode_0007 --strategy nearest
-
-  # 覆盖 Redis 地址
-  python scripts/publish_task.py --episode episode_0007 --redis-host 192.168.1.100
 
 采集程序中使用:
   from scripts.publish_task import publish_episode
@@ -159,27 +129,13 @@ def main():
         help='Redis 配置文件路径'
     )
 
-    parser.add_argument(
-        '--redis-host',
-        type=str,
-        help='Redis 主机地址（覆盖配置文件）'
-    )
-
-    parser.add_argument(
-        '--redis-port',
-        type=int,
-        help='Redis 端口（覆盖配置文件）'
-    )
-
     args = parser.parse_args()
 
     success = publish_episode(
         episode_id=args.episode,
         source=args.source,
         strategy=args.strategy,
-        config_path=args.config,
-        redis_host=args.redis_host,
-        redis_port=args.redis_port
+        config_path=args.config
     )
 
     sys.exit(0 if success else 1)
