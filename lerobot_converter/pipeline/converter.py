@@ -17,10 +17,12 @@ from .cleaner import DataCleaner
 class LeRobotConverter:
     """LeRobot v2.1 数据转换器（支持三种对齐策略）"""
 
-    def __init__(self, config_or_path):
+    def __init__(self, config_or_path, input_data_path=None, input_images_path=None):
         """
         Args:
             config_or_path: 配置字典或配置文件路径
+            input_data_path: 输入关节数据路径（覆盖配置文件）
+            input_images_path: 输入图像数据路径（覆盖配置文件）
         """
         # 加载配置
         if isinstance(config_or_path, dict):
@@ -42,9 +44,9 @@ class LeRobotConverter:
             self.config['output']['dataset_name']
         )
 
-        # 提取配置
-        self.data_path = Path(self.config['input']['data_path'])
-        self.images_path = Path(self.config['input']['images_path'])
+        # 提取配置（支持路径覆盖）
+        self.data_path = Path(input_data_path or self.config['input']['data_path'])
+        self.images_path = Path(input_images_path or self.config['input']['images_path'])
         self.arms = self.config['robot']['arms']
         self.cameras = self.config['cameras']
         self.base_camera_name = get_base_camera_name(self.config)
