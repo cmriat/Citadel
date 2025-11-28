@@ -1,4 +1,4 @@
-[project]
+[workspace]
 name = "lerobot_converter"
 version = "0.1.0"
 description = "Convert airbot_play data to LeRobot v2.1 format with configurable alignment strategies"
@@ -17,6 +17,8 @@ tqdm = ">=4.65.0"
 
 [pypi-dependencies]
 redis = ">=5.0.0"
+boto3 = ">=1.34.0"
+click = ">=8.1.0"
 
 [feature.dev.dependencies]
 pytest = ">=7.4.0"
@@ -24,28 +26,47 @@ jupyterlab = ">=4.0.0"
 ipykernel = ">=6.25.0"
 ruff = ">=0.1.0"
 
+# 定义 environments
+[environments]
+dev = ["dev"]
+
 [tasks]
-# 三种对齐策略的快捷命令
-convert-nearest = "python scripts/convert.py --config config/dual_arm_nearest.yaml"
-convert-chunking = "python scripts/convert.py --config config/dual_arm_chunking.yaml"
-convert-window = "python scripts/convert.py --config config/dual_arm_window.yaml"
+# =============================================================================
+# 统一CLI入口（推荐使用）
+# =============================================================================
+# 本地数据转换 - 三种对齐策略
+convert-nearest = "python -m lerobot_converter.cli convert --config config/strategies/nearest.yaml"
+convert-chunking = "python -m lerobot_converter.cli convert --config config/strategies/chunking.yaml"
+convert-window = "python -m lerobot_converter.cli convert --config config/strategies/window.yaml"
 
-# 通用转换命令
-convert = "python scripts/convert.py"
+# Redis Worker - 处理队列中的转换任务
+worker = "python -m lerobot_converter.cli worker --config config/storage.yaml"
 
-# 测试命令
+# BOS Scanner - 扫描BOS上的新episodes并发布任务
+scanner = "python -m lerobot_converter.cli scanner --config config/storage.yaml"
+
+# 发布任务到Redis队列
+publish = "python -m lerobot_converter.cli publish --config config/storage.yaml"
+
+# 监控Redis队列状态
+monitor = "python -m lerobot_converter.cli monitor --config config/storage.yaml"
+
+# =============================================================================
+# 测试和开发工具
+# =============================================================================
 test = "pytest tests/ -v"
 test-aligners = "pytest tests/test_aligners.py -v"
 
-# 开发工具
 lint = "ruff check lerobot_converter/"
 format = "ruff format lerobot_converter/"
 jupyter = "jupyter lab"
 
-# 验证输出
 verify = "python examples/verify_output.py"
 
-# Redis 多数据源处理
-redis-worker = "python scripts/redis_worker.py"
-redis-monitor = "python scripts/monitor_redis.py"
-publish-task = "python scripts/publish_task.py"
+# =============================================================================
+# 旧版脚本（已废弃，将在下一版本移除）
+# =============================================================================
+# 以下命令仅用于向后兼容，建议使用上面的CLI命令
+legacy-convert = "python scripts/convert.py"
+legacy-worker = "python scripts/redis_worker.py"
+legacy-scanner = "python scripts/bos_scanner.py"
