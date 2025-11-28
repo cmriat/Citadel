@@ -1,0 +1,76 @@
+# Demo数据测试配置 - Chunking策略
+# 用于测试 demo_datas/ 目录中的示例数据
+
+# ============================================================
+# 机器人配置
+# ============================================================
+robot:
+  type: "dual_arm"
+  arms:
+    - name: "left_slave"
+      file: "left_slave.parquet"
+      role: "slave"
+    - name: "left_master"
+      file: "left_master.parquet"
+      role: "master"
+    - name: "right_slave"
+      file: "right_slave.parquet"
+      role: "slave"
+    - name: "right_master"
+      file: "right_master.parquet"
+      role: "master"
+  joints_per_arm: 7  # joint1-6 + eef_gripper_joint_pos
+
+# ============================================================
+# 相机配置 (demo数据使用: cam_head, cam_left, cam_right)
+# ============================================================
+cameras:
+  - name: "cam_left"
+    role: "base"         # 基准时间轴
+    target_fps: 25
+  - name: "cam_right"
+    role: "sync"         # 同步到基准
+    target_fps: 25
+  - name: "cam_head"
+    role: "sync"         # 同步到基准
+    target_fps: 30
+
+# ============================================================
+# 输入路径配置
+# ============================================================
+input:
+  # Demo数据路径（新格式：episode_XXXX/joints/ 和 episode_XXXX/images/）
+  data_path: "./demo_datas/qurd_arm_task"
+  images_path: "./demo_datas/qurd_arm_task"
+
+# ============================================================
+# 输出配置
+# ============================================================
+output:
+  base_path: "./lerobot_demo_output"
+  dataset_name: "airbot_play_dual_arm_demo"
+
+# ============================================================
+# 对齐策略配置
+# ============================================================
+alignment:
+  strategy: "chunking"      # 策略: nearest | chunking | window
+  chunk_size: 10            # Action chunking 专用: 未来 N 步动作
+  padding_mode: "repeat"    # chunking 边界处理: repeat | zeros
+  tolerance_ms: 20          # 时间容差（毫秒）
+
+# ============================================================
+# 过滤配置
+# ============================================================
+filtering:
+  min_duration_sec: 0.5     # 过滤时长 < 0.5秒的 episodes
+  require_all_cameras: true # 要求所有相机数据完整
+
+# ============================================================
+# 视频编码配置
+# ============================================================
+video:
+  fps: 30
+  codec: "h264"
+  crf: 23                   # 质量参数 (越小质量越高)
+  preset: "medium"          # 编码速度: ultrafast | fast | medium | slow

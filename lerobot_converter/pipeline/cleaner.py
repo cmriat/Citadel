@@ -68,7 +68,7 @@ class DataCleaner:
 
     def _validate_episode(self, episode_id: str) -> tuple:
         """
-        验证单个 episode
+        验证单个 episode（自动适配新旧格式）
 
         Args:
             episode_id: Episode ID
@@ -76,8 +76,20 @@ class DataCleaner:
         Returns:
             (is_valid, reason)
         """
-        ep_data_dir = self.data_path / episode_id
-        ep_images_dir = self.images_path / episode_id
+        ep_base_dir = self.data_path / episode_id
+
+        # 检测数据格式
+        # 新格式：episode_XXXX/joints/*.parquet, episode_XXXX/images/
+        # 旧格式：episode_XXXX/*.parquet, (images_path)/episode_XXXX/
+        new_format_joints_dir = ep_base_dir / "joints"
+        if new_format_joints_dir.exists() and new_format_joints_dir.is_dir():
+            # 新格式
+            ep_data_dir = new_format_joints_dir
+            ep_images_dir = ep_base_dir / "images"
+        else:
+            # 旧格式
+            ep_data_dir = ep_base_dir
+            ep_images_dir = self.images_path / episode_id
 
         # 1. 检查图像目录是否存在
         if not ep_images_dir.exists():
@@ -90,10 +102,13 @@ class DataCleaner:
             if not arm_file.exists():
                 return False, f"Missing {arm['file']}"
 
-        # 3. 检查元数据
+        # 3. 检查元数据 (优先在 joints 目录下查找，因为它包含更完整的信息)
         metadata_file = ep_data_dir / 'metadata.json'
         if not metadata_file.exists():
-            return False, "Missing metadata.json"
+            # 回退到 images 目录
+            metadata_file = ep_images_dir / 'metadata.json'
+            if not metadata_file.exists():
+                return False, "Missing metadata.json"
 
         with open(metadata_file, 'r') as f:
             metadata = json.load(f)
@@ -120,7 +135,7 @@ class DataCleaner:
 
     def get_episode_stats(self, episode_id: str) -> Dict:
         """
-        获取 episode 统计信息
+        获取 episode 统计信息（自动适配新旧格式）
 
         Args:
             episode_id: Episode ID
@@ -128,11 +143,25 @@ class DataCleaner:
         Returns:
             统计信息字典
         """
-        ep_data_dir = self.data_path / episode_id
-        ep_images_dir = self.images_path / episode_id
+        ep_base_dir = self.data_path / episode_id
 
-        # 读取元数据
-        with open(ep_data_dir / 'metadata.json', 'r') as f:
+        # 检测数据格式（与 _validate_episode 保持一致）
+        new_format_joints_dir = ep_base_dir / "joints"
+        if new_format_joints_dir.exists() and new_format_joints_dir.is_dir():
+            # 新格式
+            ep_data_dir = new_format_joints_dir
+            ep_images_dir = ep_base_dir / "images"
+        else:
+            # 旧格式
+            ep_data_dir = ep_base_dir
+            ep_images_dir = self.images_path / episode_id
+
+        # 读取元数据（优先在 joints 目录，因为它包含更完整的信息）
+        metadata_file = ep_data_dir / 'metadata.json'
+        if not metadata_file.exists():
+            metadata_file = ep_images_dir / 'metadata.json'
+
+        with open(metadata_file, 'r') as f:
             metadata = json.load(f)
 
         # 统计相机帧数
