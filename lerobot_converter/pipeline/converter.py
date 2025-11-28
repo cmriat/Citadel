@@ -5,7 +5,7 @@ from typing import Dict, List
 import numpy as np
 from tqdm import tqdm
 
-from ..common import io, timestamp, camera
+from ..utils import io, timestamp, camera
 from ..aligners import NearestAligner, ChunkingAligner, WindowAligner
 from ..writers.parquet import ParquetWriter
 from ..writers.video import VideoEncoder
