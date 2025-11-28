@@ -51,6 +51,11 @@ class LeRobotConverter:
         self.cameras = self.config['cameras']
         self.base_camera_name = get_base_camera_name(self.config)
 
+        # 数据格式标志（稍后在处理具体 episode 时检测）
+        # 旧格式：data_path/episode_XXXX/*.parquet, images_path/episode_XXXX/cam_*/
+        # 新格式：data_path/episode_XXXX/joints/*.parquet, data_path/episode_XXXX/images/cam_*/
+        self._format_cache = {}  # episode_id -> format_type
+
         print(f"\n{'='*60}")
         print(f"LeRobot v2.1 Converter")
         print(f"{'='*60}")
@@ -71,6 +76,31 @@ class LeRobotConverter:
             return WindowAligner(self.config['alignment'])
         else:
             raise ValueError(f"Unknown strategy: {strategy}")
+
+    def _detect_format(self, episode_id: str) -> str:
+        """检测数据格式（自动兼容新旧格式）
+
+        旧格式：data_path/episode_XXXX/*.parquet, images_path/episode_XXXX/cam_*/
+        新格式：data_path/episode_XXXX/joints/*.parquet, data_path/episode_XXXX/images/cam_*/
+
+        Args:
+            episode_id: Episode ID
+
+        Returns:
+            'legacy' or 'new'
+        """
+        if episode_id in self._format_cache:
+            return self._format_cache[episode_id]
+
+        # 检查新格式特征：episode_XXXX/joints/ 目录是否存在
+        new_format_joints_dir = self.data_path / episode_id / "joints"
+
+        if new_format_joints_dir.exists() and new_format_joints_dir.is_dir():
+            self._format_cache[episode_id] = 'new'
+            return 'new'
+        else:
+            self._format_cache[episode_id] = 'legacy'
+            return 'legacy'
 
     def convert(self, episode_id: str = None):
         """
@@ -182,7 +212,7 @@ class LeRobotConverter:
 
     def _load_arm_data(self, episode_id: str) -> Dict:
         """
-        加载四臂关节数据
+        加载四臂关节数据（自动适配新旧格式）
 
         Returns:
             {
@@ -193,7 +223,14 @@ class LeRobotConverter:
             }
         """
         arm_data = {}
-        ep_dir = self.data_path / episode_id
+        data_format = self._detect_format(episode_id)
+
+        if data_format == 'new':
+            # 新格式：data_path/episode_XXXX/joints/*.parquet
+            ep_dir = self.data_path / episode_id / "joints"
+        else:
+            # 旧格式：data_path/episode_XXXX/*.parquet
+            ep_dir = self.data_path / episode_id
 
         for arm in self.arms:
             arm_file = ep_dir / arm['file']
@@ -211,7 +248,7 @@ class LeRobotConverter:
 
     def _load_camera_data(self, episode_id: str) -> Dict:
         """
-        加载相机数据
+        加载相机数据（自动适配新旧格式）
 
         Returns:
             {
@@ -220,7 +257,15 @@ class LeRobotConverter:
                 'cam_head': {...}
             }
         """
-        ep_images_dir = self.images_path / episode_id
+        data_format = self._detect_format(episode_id)
+
+        if data_format == 'new':
+            # 新格式：data_path/episode_XXXX/images/
+            ep_images_dir = self.data_path / episode_id / "images"
+        else:
+            # 旧格式：images_path/episode_XXXX/
+            ep_images_dir = self.images_path / episode_id
+
         metadata_file = ep_images_dir / 'metadata.json'
         metadata = io.load_json(str(metadata_file))
 
@@ -239,7 +284,7 @@ class LeRobotConverter:
 
     def _get_camera_images(self, episode_id: str, synced_frames: List[Dict]) -> Dict:
         """
-        获取相机图像路径列表
+        获取相机图像路径列表（自动适配新旧格式）
 
         Returns:
             {
@@ -248,8 +293,17 @@ class LeRobotConverter:
                 'cam_head': [...]
             }
         """
-        ep_images_dir = self.images_path / episode_id
+        data_format = self._detect_format(episode_id)
+
+        if data_format == 'new':
+            # 新格式：data_path/episode_XXXX/images/
+            ep_images_dir = self.data_path / episode_id / "images"
+        else:
+            # 旧格式：images_path/episode_XXXX/
+            ep_images_dir = self.images_path / episode_id
+
         camera_images = {}
+        missing_count = 0  # 统计缺失的图像数量
 
         for cam in self.cameras:
             cam_name = cam['name']
@@ -267,7 +321,15 @@ class LeRobotConverter:
 
                     if img_file.exists():
                         images.append(str(img_file))
+                    else:
+                        # 图像文件缺失，记录警告
+                        logger.warning(f"Missing image file: {img_file}")
+                        missing_count += 1
 
             camera_images[cam_name] = images
+
+        # 报告缺失图像的总数
+        if missing_count > 0:
+            logger.warning(f"Total missing images for episode {episode_id}: {missing_count}")
 
         return camera_images
