@@ -1,0 +1,116 @@
+# LeRobot 存储配置
+# 统一管理 Redis 和 BOS (Baidu Object Storage) 配置
+
+# ============================================================
+# Redis 配置
+# ============================================================
+redis:
+  # 连接配置
+  host: "localhost"
+  port: 6379
+  password: null
+  db: 0
+
+  # 队列配置
+  queue_name: "lerobot:episodes"
+  stream_name: "episodes:new"
+  consumer_group: "converters"
+
+  # 性能配置
+  max_workers: 2              # 最大并发转换数
+  poll_interval: 1            # 轮询间隔（秒）
+  retry_failed: false         # 是否重试失败任务
+
+  # 数据保留
+  retention_days: 30          # 处理记录保留天数（Redis TTL）
+
+# ============================================================
+# BOS (百度云对象存储) 配置
+# ============================================================
+bos:
+  # 连接配置
+  endpoint: "https://s3.bj.bcebos.com"
+  bucket: "srgdata"
+  region: "bj"  # 北京区域
+
+  # 凭证（从环境变量读取，安全性）
+  # 运行前设置: export BOS_ACCESS_KEY=xxx BOS_SECRET_KEY=xxx
+  access_key: "${BOS_ACCESS_KEY}"
+  secret_key: "${BOS_SECRET_KEY}"
+
+  # 路径配置
+  paths:
+    raw_data: "robot/raw_data/upload_test/online_test/quad_arm_task/"
+    converted: "robot/raw_data/upload_test/converted/"
+
+  # 任务名称（用于目录重组织）
+  task_name: "quad_arm_task"
+
+  # 扫描配置
+  scanner:
+    interval: 120                       # 扫描间隔（秒）
+    timeout: 300                        # 单次扫描超时（秒）
+    max_keys: 1000                      # 每次 List 最多获取的对象数
+    enable_incremental: true            # 启用增量扫描
+    incremental_key: "bos:last_scanned_key"
+
+  # 数据完整性检查
+  validation:
+    required_dirs:
+      - "images"
+      - "joints"
+    check_count_match: false            # 新格式关闭数量匹配检查
+    count_tolerance: 0
+    stable_time: 10                     # 上传稳定性检查（秒）
+    min_file_count: 1                   # 每个目录最少文件数
+
+  # 下载配置
+  download:
+    temp_dir: "${LEROBOT_TEMP_DIR}"     # 临时目录（支持环境变量）
+    concurrent: 4                       # 并发下载线程数
+    chunk_size: 8388608                 # 下载块大小（8MB）
+    retry: 3                            # 重试次数
+    retry_delay: 5                      # 重试延迟（秒）
+
+  # 上传配置
+  upload:
+    concurrent: 4                       # 并发上传线程数
+    chunk_size: 8388608                 # 上传块大小（8MB）
+    retry: 3                            # 重试次数
+    retry_delay: 5                      # 重试延迟（秒）
+    cleanup_local: true                 # 上传成功后删除本地临时文件
+    overwrite: false                    # 是否覆盖已存在的文件
+
+# ============================================================
+# 多数据源配置（用于 Redis Worker）
+# ============================================================
+sources:
+  - robot_1
+  - robot_2
+  - robot_3
+
+# ============================================================
+# 输出路径配置
+# ============================================================
+output:
+  # {source}: 机器人ID, {episode_id}: episode名称, {strategy}: 对齐策略
+  pattern: "./lerobot_datasets/{source}/{episode_id}_{strategy}"
+  # BOS 输出路径模板（用于scanner）
+  bos_pattern: "lerobot_dataset_{task}_{strategy}"
+
+# ============================================================
+# 转换配置（默认策略）
+# ============================================================
+conversion:
+  strategy: "chunking"                  # 默认对齐策略
+  output_fps: 30                        # 输出视频帧率
+  chunk_size: 10                        # Action chunking 大小
+  config_template: "config/strategies/chunking.yaml"  # 策略配置模板
+
+# ============================================================
+# 日志配置
+# ============================================================
+logging:
+  level: "INFO"                         # DEBUG, INFO, WARNING, ERROR
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: null                            # 日志文件路径（null 表示只输出到控制台）

@@ -1,0 +1,76 @@
+# Time Window Aggregation 策略配置
+# 适用于新数据格式（BOS下载后或本地新格式）
+# 数据利用率：中等（时间窗口聚合，平滑降噪）
+
+# ============================================================
+# 机器人配置
+# ============================================================
+robot:
+  type: "dual_arm"
+  arms:
+    - name: "left_slave"
+      file: "left_slave.parquet"
+      role: "slave"
+    - name: "left_master"
+      file: "left_master.parquet"
+      role: "master"
+    - name: "right_slave"
+      file: "right_slave.parquet"
+      role: "slave"
+    - name: "right_master"
+      file: "right_master.parquet"
+      role: "master"
+  joints_per_arm: 7
+
+# ============================================================
+# 相机配置
+# ============================================================
+cameras:
+  - name: "cam_left_wrist"
+    role: "base"
+    target_fps: 25
+  - name: "cam_right_wrist"
+    role: "sync"
+    target_fps: 25
+  - name: "cam_env"
+    role: "downsample"
+    target_fps: 30
+
+# ============================================================
+# 输入路径配置
+# ============================================================
+input:
+  data_path: "/home/admin01/maoz/lerobot_convert/real_datas/qurd_arm_task"
+  images_path: "/home/admin01/maoz/lerobot_convert/real_datas/qurd_arm_task"
+
+# ============================================================
+# 输出配置
+# ============================================================
+output:
+  base_path: "./lerobot_dataset_window"
+  dataset_name: "airbot_play_dual_arm"
+
+# ============================================================
+# 对齐策略配置
+# ============================================================
+alignment:
+  strategy: "window"        # 时间窗口平均策略
+  window_ms: 20             # 时间窗口大小 (±20ms)
+  aggregation: "mean"       # 聚合方法: mean | median
+  tolerance_ms: 20
+
+# ============================================================
+# 过滤配置
+# ============================================================
+filtering:
+  min_duration_sec: 0.5     # 过滤时长 < 0.5秒的 episodes
+  require_all_cameras: true # 要求所有相机数据完整
+
+# ============================================================
+# 视频编码配置
+# ============================================================
+video:
+  fps: 30
+  codec: "h264"
+  crf: 23
+  preset: "medium"
