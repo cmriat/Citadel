@@ -46,3 +46,4 @@ dump.rdb
 # Task tracking
 .conversion_history.json
 tasks.db
+real_datas/
