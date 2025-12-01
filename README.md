@@ -56,61 +56,64 @@ pixi run worker
 # 5. 监控队列状态（可选）
 pixi run monitor
 ```
+---
+### 最佳实践命令
 
-### 完整命令
+#### 本地数据转换
 ```bash
-1️⃣ 本地数据转换
 # 转换所有 episodes
-pixi run python -m lerobot_converter.cli convert -c
-config/demo_test.yaml
+pixi run python -m lerobot_converter.cli convert -c config/demo_test.yaml
 
 # 转换单个 episode
-pixi run python -m lerobot_converter.cli convert -c
-config/demo_test.yaml -e episode_0001
+pixi run python -m lerobot_converter.cli convert -c config/demo_test.yaml -e episode_0001
 
 # 覆盖输出路径
-pixi run python -m lerobot_converter.cli convert -c
-config/demo_test.yaml -o ./custom_output
+pixi run python -m lerobot_converter.cli convert -c config/demo_test.yaml -o ./custom_output
+```
 
-2️⃣ BOS 云端数据转换（需要3个终端）
-# 设置 BOS 凭证（所有终端都需要）
+#### BOS 云端数据转换
+需要3个终端同时运行：
+
+**终端1 - Scanner（扫描新 episodes）**
+```bash
 export BOS_ACCESS_KEY=xxx
 export BOS_SECRET_KEY=xxx
 
-终端1 - 启动 Scanner（扫描新 episodes 并发布到队列）
 # 持续扫描（每120秒）
-pixi run python -m lerobot_converter.cli scanner -c
-config/storage.yaml
+pixi run python -m lerobot_converter.cli scanner -c config/storage.yaml
 
-# 或：只扫描一次
-pixi run python -m lerobot_converter.cli scanner -c
-config/storage.yaml --once
+# 只扫描一次
+pixi run python -m lerobot_converter.cli scanner -c config/storage.yaml --once
 
-# 或：完整扫描（忽略增量位置）
-pixi run python -m lerobot_converter.cli scanner -c
-config/storage.yaml --full-scan
+# 完整扫描（忽略增量位置）
+pixi run python -m lerobot_converter.cli scanner -c config/storage.yaml --full-scan
+```
 
-终端2 - 启动 Worker（消费队列并转换）
+**终端2 - Worker（消费队列并转换）**
+```bash
+export BOS_ACCESS_KEY=xxx
+export BOS_SECRET_KEY=xxx
+
 # 启动 worker（默认2个并发）
-pixi run python -m lerobot_converter.cli worker -c
-config/storage.yaml
+pixi run python -m lerobot_converter.cli worker -c config/storage.yaml
 
-# 或：指定并发数
-pixi run python -m lerobot_converter.cli worker -c
-config/storage.yaml --max-workers 4
+# 指定并发数
+pixi run python -m lerobot_converter.cli worker -c config/storage.yaml --max-workers 4
+```
 
-终端3 - 监控队列（可选）
+**终端3 - Monitor（监控队列，可选）**
+```bash
 # 实时监控队列状态
-pixi run python -m lerobot_converter.cli monitor -c
-config/storage.yaml --refresh 5
+pixi run python -m lerobot_converter.cli monitor -c config/storage.yaml --refresh 5
+```
 
-3️⃣ 手动发布单个任务到队列
+#### 手动发布任务
+```bash
 export BOS_ACCESS_KEY=xxx
 export BOS_SECRET_KEY=xxx
 
 # 发布 BOS 上的 episode
-pixi run python -m lerobot_converter.cli publish -e
-episode_0001 -s bos --strategy chunking
+pixi run python -m lerobot_converter.cli publish -e episode_0001 -s bos --strategy chunking
 ```
 
 ## CLI命令一览
@@ -226,11 +229,12 @@ lerobot_convert/
 │   ├── aligners/               # 对齐策略
 │   ├── bos/                    # BOS集成
 │   ├── redis/                  # Redis任务队列
+│   ├── writers/                # 数据输出
+│   ├── utils/                  # 工具函数
 │   └── cli.py                  # 统一CLI入口
 ├── config/                     # 配置文件
 │   ├── strategies/             # 策略配置
 │   └── storage.yaml            # 存储配置
-├── scripts/                    # 辅助脚本
 └── tests/                      # 测试用例
 ```
 

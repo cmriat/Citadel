@@ -93,6 +93,9 @@
 - **TaskQueue**: 任务发布/消费
 - **RedisWorker**: Worker进程
 
+#### 5. CLI (统一命令行接口)
+- **cli.py**: 统一的命令行入口，集成所有功能
+
 ---
 
 ## 安装和配置
@@ -493,12 +496,11 @@ pixi run python -m lerobot_converter.cli publish \
 
 ```json
 {
-  "task_id": "task_1732780800_abc123",
   "episode_id": "episode_0001",
   "source": "bos",
   "strategy": "chunking",
-  "priority": 1,
-  "created_at": "2025-11-28T10:00:00Z"
+  "config_overrides": {},
+  "timestamp": 1764564821.036
 }
 ```
 
@@ -508,10 +510,9 @@ pixi run python -m lerobot_converter.cli publish \
 
 ```yaml
 sources:
-  - local      # 本地文件系统
-  - bos        # BOS云存储
   - robot_1    # 机器人1
   - robot_2    # 机器人2
+  - robot_3    # 机器人3
 
 output:
   pattern: "./lerobot_datasets/{source}/{episode_id}_{strategy}"
@@ -1180,16 +1181,15 @@ pixi run convert-chunking                    # 使用chunking策略
 pixi run python -m lerobot_converter.cli convert -c CONFIG -e EPISODE
 
 # BOS自动化
-pixi run scanner                             # 启动扫描器
-pixi run worker                              # 启动worker
-pixi run monitor                             # 监控队列
-pixi run publish -e EPISODE -s SOURCE       # 手动发布任务
+pixi run python -m lerobot_converter.cli scanner     # 扫描BOS新数据
+pixi run python -m lerobot_converter.cli worker      # 处理转换任务
+pixi run python -m lerobot_converter.cli monitor     # 监控队列状态
+pixi run python -m lerobot_converter.cli publish     # 手动发布任务
 
-# 开发工具
-pixi run test                                # 运行测试
-pixi run lint                                # 代码检查
-pixi run format                              # 格式化
-pixi run jupyter                             # Jupyter Lab
+# 查看帮助
+pixi run python -m lerobot_converter.cli --help
+pixi run python -m lerobot_converter.cli convert --help
+pixi run python -m lerobot_converter.cli scanner --help
 ```
 
 ### B. 环境变量
