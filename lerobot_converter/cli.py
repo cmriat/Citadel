@@ -104,51 +104,40 @@ def worker(config, source, max_workers):
     示例：
       lerobot-convert worker -c config/storage.yaml -s robot_1
     """
-    import yaml
     from lerobot_converter.redis import RedisClient, TaskQueue, RedisWorker
 
     click.echo(f"📂 Loading config: {config}")
 
-    with open(config, 'r') as f:
-        full_config = yaml.safe_load(f)
+    # 初始化 Redis 客户端（从配置文件）
+    redis_client = RedisClient(config)
 
-    redis_config = full_config.get('redis', {})
-    conversion_config = full_config.get('conversion', {})
-    output_config = full_config.get('output', {})
-
-    # 应用命令行参数覆盖
-    if max_workers:
-        redis_config['max_workers'] = max_workers
-
-    # 数据源
-    if source:
-        sources = [source]
-    else:
-        sources = full_config.get('sources', ['local'])
-
-    click.echo(f"✓ Data sources: {', '.join(sources)}")
-    click.echo(f"✓ Max workers: {redis_config.get('max_workers', 2)}")
-
-    # 初始化Redis客户端
-    redis_client = RedisClient(
-        host=redis_config.get('host', 'localhost'),
-        port=redis_config.get('port', 6379),
-        password=redis_config.get('password'),
-        db=redis_config.get('db', 0),
-        queue_name=redis_config.get('queue_name', 'lerobot:episodes')
-    )
-
-    if not redis_client.test_connection():
+    if not redis_client.ping():
         click.echo("❌ Redis connection failed", err=True)
         sys.exit(1)
 
     click.echo("✓ Redis connection successful")
 
+    # 获取配置（通过 RedisClient）
+    worker_config = redis_client.get_worker_config()
+
+    # 应用命令行参数覆盖
+    if max_workers:
+        worker_config['max_workers'] = max_workers
+
+    # 数据源
+    if source:
+        sources = [source]
+    else:
+        sources = redis_client.get_sources()
+
+    click.echo(f"✓ Data sources: {', '.join(sources)}")
+    click.echo(f"✓ Max workers: {worker_config.get('max_workers', 2)}")
+
     # 创建Worker
     worker_instance = RedisWorker(
-        output_pattern=output_config.get('pattern', './lerobot_datasets/{source}/{episode_id}_{strategy}'),
-        config_template=conversion_config.get('config_template', 'config/strategies/chunking.yaml'),
-        default_strategy=conversion_config.get('strategy', 'chunking'),
+        output_pattern=redis_client.get_output_pattern(),
+        config_template=redis_client.get_conversion_config().get('config_template', 'config/strategies/chunking.yaml'),
+        default_strategy=redis_client.get_conversion_config().get('strategy', 'chunking'),
         bos_config_path=config  # 传递完整配置以支持BOS源
     )
 
@@ -160,7 +149,7 @@ def worker(config, source, max_workers):
 
     try:
         while True:
-            task_data = task_queue.get_task(timeout=redis_config.get('poll_interval', 1))
+            task_data = task_queue.get_task(timeout=worker_config.get('poll_interval', 1))
             if task_data:
                 worker_instance.process_task(task_data, task_queue)
     except KeyboardInterrupt:
@@ -187,9 +176,6 @@ def scanner(config, interval, once, full_scan):
 
     click.echo(f"📂 Loading config: {config}")
 
-    with open(config, 'r') as f:
-        full_config = yaml.safe_load(f)
-
     # 初始化BOS客户端
     bos_client = BosClient(config)
 
@@ -199,17 +185,10 @@ def scanner(config, interval, once, full_scan):
 
     click.echo("✓ BOS connection successful")
 
-    # 初始化Redis
-    redis_config = full_config.get('redis', {})
-    redis_client = RedisClient(
-        host=redis_config.get('host', 'localhost'),
-        port=redis_config.get('port', 6379),
-        password=redis_config.get('password'),
-        db=redis_config.get('db', 0),
-        queue_name=redis_config.get('queue_name', 'lerobot:episodes')
-    )
+    # 初始化 Redis 客户端（从配置文件）
+    redis_client = RedisClient(config)
 
-    if not redis_client.test_connection():
+    if not redis_client.ping():
         click.echo("❌ Redis connection failed", err=True)
         sys.exit(1)
 
@@ -283,27 +262,19 @@ def publish(config, episode, source, strategy):
     示例：
       lerobot-convert publish -e episode_0001 -s robot_1 --strategy chunking
     """
-    import yaml
     from lerobot_converter.redis import RedisClient, TaskQueue
     from lerobot_converter.core.task import ConversionTask, AlignmentStrategy
 
-    with open(config, 'r') as f:
-        full_config = yaml.safe_load(f)
+    click.echo(f"📂 Loading config: {config}")
 
-    redis_config = full_config.get('redis', {})
+    # 初始化 Redis 客户端（从配置文件）
+    redis_client = RedisClient(config)
 
-    # 初始化Redis
-    redis_client = RedisClient(
-        host=redis_config.get('host', 'localhost'),
-        port=redis_config.get('port', 6379),
-        password=redis_config.get('password'),
-        db=redis_config.get('db', 0),
-        queue_name=redis_config.get('queue_name', 'lerobot:episodes')
-    )
-
-    if not redis_client.test_connection():
+    if not redis_client.ping():
         click.echo("❌ Redis connection failed", err=True)
         sys.exit(1)
+
+    click.echo("✓ Redis connection successful")
 
     task_queue = TaskQueue(redis_client.client, redis_client.get_queue_name())
 
@@ -317,7 +288,7 @@ def publish(config, episode, source, strategy):
     )
 
     # 发布任务
-    task_queue.publish(task.to_dict())
+    task_queue.publish(task)
 
     click.echo(f"✓ Published task:")
     click.echo(f"  Episode: {episode}")
@@ -338,31 +309,26 @@ def monitor(config, refresh):
     示例：
       lerobot-convert monitor -c config/storage.yaml --refresh 5
     """
-    import yaml
     import time
     from lerobot_converter.redis import RedisClient, TaskQueue
 
-    with open(config, 'r') as f:
-        full_config = yaml.safe_load(f)
+    click.echo(f"📂 Loading config: {config}")
 
-    redis_config = full_config.get('redis', {})
+    # 初始化 Redis 客户端（从配置文件）
+    redis_client = RedisClient(config)
 
-    # 初始化Redis
-    redis_client = RedisClient(
-        host=redis_config.get('host', 'localhost'),
-        port=redis_config.get('port', 6379),
-        password=redis_config.get('password'),
-        db=redis_config.get('db', 0),
-        queue_name=redis_config.get('queue_name', 'lerobot:episodes')
-    )
-
-    if not redis_client.test_connection():
+    if not redis_client.ping():
         click.echo("❌ Redis connection failed", err=True)
         sys.exit(1)
 
+    click.echo("✓ Redis connection successful")
+
     task_queue = TaskQueue(redis_client.client, redis_client.get_queue_name())
 
-    click.echo("🔍 Redis Queue Monitor")
+    # 获取数据源列表
+    sources = redis_client.get_sources()
+
+    click.echo("\n🔍 Redis Queue Monitor")
     click.echo(f"Queue: {task_queue.queue_name}")
     click.echo(f"Refresh: {refresh}s")
     click.echo("Press Ctrl+C to stop\n")
@@ -370,16 +336,15 @@ def monitor(config, refresh):
     try:
         while True:
             # 获取统计信息
-            pending = task_queue.queue_size()
-            failed = task_queue.failed_queue_size()
+            pending = task_queue.get_pending_count()
+            failed = task_queue.get_failed_count()
 
             # 获取各数据源的统计
-            sources = full_config.get('sources', ['local', 'bos'])
             stats_lines = []
-
             for source in sources:
-                completed = task_queue.get_stats(source, 'completed')
-                failed_count = task_queue.get_stats(source, 'failed')
+                stats = task_queue.get_stats(source)
+                completed = stats['completed']
+                failed_count = stats['failed']
                 stats_lines.append(f"  {source}: ✓ {completed}  ✗ {failed_count}")
 
             # 清屏并显示

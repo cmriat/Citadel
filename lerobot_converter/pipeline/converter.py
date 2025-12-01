@@ -1,5 +1,6 @@
 """主转换器"""
 
+import logging
 from pathlib import Path
 from typing import Dict, List
 import numpy as np
@@ -12,6 +13,8 @@ from ..writers.video import VideoEncoder
 from ..writers.metadata import MetadataGenerator
 from .config import load_config, get_base_camera_name
 from .cleaner import DataCleaner
+
+logger = logging.getLogger(__name__)
 
 
 class LeRobotConverter:
