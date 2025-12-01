@@ -47,3 +47,5 @@ dump.rdb
 .conversion_history.json
 tasks.db
 real_datas/
+demo_datas/
+lerobot_demo_output/

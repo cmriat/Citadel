@@ -3,11 +3,9 @@
 扫描 BOS 上的新 episode，进行完整性检查，并发布到 Redis Stream。
 """
 
-import time
 import logging
-from typing import Set, Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone
-from collections import defaultdict
 
 from .client import BosClient
 
@@ -53,7 +51,8 @@ class EpisodeScanner:
             incremental_key = self.scanner_config.get('incremental_key', 'bos:last_scanned_key')
             start_after_bytes = self.task_queue.redis.get(incremental_key)
             if start_after_bytes:
-                start_after = start_after_bytes.decode('utf-8')
+                # 兼容 bytes 和 str 两种情况
+                start_after = start_after_bytes.decode('utf-8') if isinstance(start_after_bytes, bytes) else start_after_bytes
                 logger.info(f"Resuming scan from: {start_after}")
 
         max_keys = self.scanner_config.get('max_keys', 1000)

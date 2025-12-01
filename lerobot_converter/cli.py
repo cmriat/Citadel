@@ -149,7 +149,7 @@ def worker(config, source, max_workers):
 
     try:
         while True:
-            task_data = task_queue.get_task(timeout=worker_config.get('poll_interval', 1))
+            task_data = task_queue.get(timeout=worker_config.get('poll_interval', 1))
             if task_data:
                 worker_instance.process_task(task_data, task_queue)
     except KeyboardInterrupt:
@@ -229,10 +229,9 @@ def scanner(config, interval, once, full_scan):
                 task = ConversionTask(
                     episode_id=ep_info['episode_id'],
                     source='bos',
-                    strategy=AlignmentStrategy.CHUNKING,
-                    priority=1
+                    strategy=AlignmentStrategy.CHUNKING
                 )
-                task_queue.publish(task.to_dict())
+                task_queue.publish(task)
                 click.echo(f"  → Published: {ep_info['episode_id']}")
 
             if once:
