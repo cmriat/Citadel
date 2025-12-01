@@ -1,9 +1,12 @@
 """视频编码器"""
 
+import logging
 import cv2
 from pathlib import Path
 from typing import List
 from tqdm import tqdm
+
+logger = logging.getLogger(__name__)
 
 
 class VideoEncoder:
@@ -48,7 +51,7 @@ class VideoEncoder:
         """
         for cam_name in camera_names:
             if cam_name not in camera_images:
-                print(f"Warning: Camera {cam_name} not found in episode {episode_index}")
+                logger.warning(f"Camera {cam_name} not found in episode {episode_index}")
                 continue
 
             self._encode_camera(
@@ -72,7 +75,7 @@ class VideoEncoder:
             image_paths: 图像文件路径列表
         """
         if not image_paths:
-            print(f"Warning: No images for {camera_name} in episode {episode_index}")
+            logger.warning(f"No images for {camera_name} in episode {episode_index}")
             return
 
         # 创建输出目录
@@ -84,7 +87,7 @@ class VideoEncoder:
         # 读取第一张图片获取尺寸
         first_img = cv2.imread(image_paths[0])
         if first_img is None:
-            print(f"Error: Cannot read image {image_paths[0]}")
+            logger.error(f"Cannot read image {image_paths[0]}")
             return
 
         height, width = first_img.shape[:2]
@@ -98,17 +101,20 @@ class VideoEncoder:
             (width, height)
         )
 
-        # 写入所有帧
-        for img_path in image_paths:
-            frame = cv2.imread(img_path)
-            if frame is None:
-                print(f"Warning: Cannot read image {img_path}, skipping")
-                continue
-            video_writer.write(frame)
+        try:
+            # 写入所有帧
+            for img_path in image_paths:
+                frame = cv2.imread(img_path)
+                if frame is None:
+                    logger.warning(f"Cannot read image {img_path}, skipping")
+                    continue
+                video_writer.write(frame)
 
-        video_writer.release()
+            logger.info(f"  ✓ Encoded {camera_name}: {len(image_paths)} frames → {output_file}")
 
-        print(f"  ✓ Encoded {camera_name}: {len(image_paths)} frames → {output_file}")
+        finally:
+            # 确保资源释放，即使发生异常
+            video_writer.release()
 
     def encode_all_cameras(
         self,
@@ -133,7 +139,7 @@ class VideoEncoder:
                 ]
             camera_names: 相机名称列表
         """
-        print(f"\n📹 Encoding videos for {len(episodes_data)} episodes...")
+        logger.info(f"Encoding videos for {len(episodes_data)} episodes...")
 
         for ep_data in tqdm(episodes_data, desc="Encoding videos"):
             self.encode_episode(
@@ -142,4 +148,4 @@ class VideoEncoder:
                 camera_names
             )
 
-        print(f"✓ Video encoding completed!")
+        logger.info(f"Video encoding completed!")

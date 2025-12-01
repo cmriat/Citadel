@@ -1,0 +1,140 @@
+{
+  "codebase_version": "v2.1",
+  "robot_type": "airbot_play_dual_arm",
+  "total_episodes": 2,
+  "total_frames": 322,
+  "total_tasks": 1,
+  "total_videos": 6,
+  "total_chunks": 1,
+  "chunks_size": 1000,
+  "fps": 30,
+  "data_path": "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet",
+  "video_path": "videos/chunk-{episode_chunk:03d}/{video_key}/episode_{episode_index:06d}.mp4",
+  "features": {
+    "observation.state.slave": {
+      "dtype": "float32",
+      "shape": [
+        14
+      ],
+      "names": [
+        "left_joint1",
+        "left_joint2",
+        "left_joint3",
+        "left_joint4",
+        "left_joint5",
+        "left_joint6",
+        "left_gripper",
+        "right_joint1",
+        "right_joint2",
+        "right_joint3",
+        "right_joint4",
+        "right_joint5",
+        "right_joint6",
+        "right_gripper"
+      ]
+    },
+    "observation.state.master": {
+      "dtype": "float32",
+      "shape": [
+        14
+      ],
+      "names": [
+        "left_joint1",
+        "left_joint2",
+        "left_joint3",
+        "left_joint4",
+        "left_joint5",
+        "left_joint6",
+        "left_gripper",
+        "right_joint1",
+        "right_joint2",
+        "right_joint3",
+        "right_joint4",
+        "right_joint5",
+        "right_joint6",
+        "right_gripper"
+      ]
+    },
+    "observation.images.cam_left": {
+      "dtype": "video",
+      "video_info": {
+        "video.fps": 30,
+        "video.codec": "h264",
+        "video.pix_fmt": "yuv420p",
+        "video.is_depth_map": false,
+        "has_audio": false
+      }
+    },
+    "observation.images.cam_right": {
+      "dtype": "video",
+      "video_info": {
+        "video.fps": 30,
+        "video.codec": "h264",
+        "video.pix_fmt": "yuv420p",
+        "video.is_depth_map": false,
+        "has_audio": false
+      }
+    },
+    "observation.images.cam_head": {
+      "dtype": "video",
+      "video_info": {
+        "video.fps": 30,
+        "video.codec": "h264",
+        "video.pix_fmt": "yuv420p",
+        "video.is_depth_map": false,
+        "has_audio": false
+      }
+    },
+    "action": {
+      "dtype": "float32",
+      "shape": [
+        10,
+        14
+      ],
+      "names": {
+        "dim_0": "chunk_step",
+        "dim_1": [
+          "left_joint1",
+          "left_joint2",
+          "left_joint3",
+          "left_joint4",
+          "left_joint5",
+          "left_joint6",
+          "left_gripper",
+          "right_joint1",
+          "right_joint2",
+          "right_joint3",
+          "right_joint4",
+          "right_joint5",
+          "right_joint6",
+          "right_gripper"
+        ]
+      }
+    },
+    "episode_index": {
+      "dtype": "int64"
+    },
+    "frame_index": {
+      "dtype": "int64"
+    },
+    "timestamp": {
+      "dtype": "int64"
+    },
+    "index": {
+      "dtype": "int64"
+    },
+    "next.done": {
+      "dtype": "bool"
+    }
+  },
+  "info": {
+    "dataset_name": "airbot_play_dual_arm_demo",
+    "cameras": [
+      "cam_left",
+      "cam_right",
+      "cam_head"
+    ],
+    "alignment_strategy": "configurable",
+    "action_space": "dual_arm_joint_position"
+  }
+}

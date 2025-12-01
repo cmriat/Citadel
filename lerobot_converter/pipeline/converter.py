@@ -55,13 +55,13 @@ class LeRobotConverter:
         self.cameras = self.config['cameras']
         self.base_camera_name = get_base_camera_name(self.config)
 
-        print(f"\n{'='*60}")
-        print(f"LeRobot v2.1 Converter")
-        print(f"{'='*60}")
-        print(f"Strategy: {self.config['alignment']['strategy']}")
-        print(f"Base camera: {self.base_camera_name}")
-        print(f"Output: {self.config['output']['base_path']}")
-        print(f"{'='*60}\n")
+        logger.info("="*60)
+        logger.info("LeRobot v2.1 Converter")
+        logger.info("="*60)
+        logger.info(f"Strategy: {self.config['alignment']['strategy']}")
+        logger.info(f"Base camera: {self.base_camera_name}")
+        logger.info(f"Output: {self.config['output']['base_path']}")
+        logger.info("="*60)
 
     def _create_aligner(self):
         """工厂方法：根据配置创建对齐器"""
@@ -85,21 +85,21 @@ class LeRobotConverter:
         """
         if episode_id:
             # 单 episode 转换
-            print(f"Converting single episode: {episode_id}")
+            logger.info(f"Converting single episode: {episode_id}")
             valid_episodes = [episode_id]
         else:
             # 批量转换
             valid_episodes = self.cleaner.scan_and_filter()
 
         if not valid_episodes:
-            print("No valid episodes found!")
+            logger.warning("No valid episodes found!")
             return
 
         # 转换所有 episodes
         all_episodes_info = []
         global_frame_offset = 0
 
-        print(f"\n🔄 Converting {len(valid_episodes)} episodes...")
+        logger.info(f"Converting {len(valid_episodes)} episodes...")
 
         for ep_idx, ep_id in enumerate(tqdm(valid_episodes, desc="Converting")):
             episode_info = self._convert_episode(ep_id, ep_idx, global_frame_offset)
@@ -120,12 +120,12 @@ class LeRobotConverter:
             fps=self.config['video']['fps']
         )
 
-        print(f"\n{'='*60}")
-        print(f"✓ Conversion completed!")
-        print(f"  Episodes: {len(valid_episodes)}")
-        print(f"  Total frames: {total_frames}")
-        print(f"  Output: {self.config['output']['base_path']}")
-        print(f"{'='*60}\n")
+        logger.info("="*60)
+        logger.info("✓ Conversion completed!")
+        logger.info(f"  Episodes: {len(valid_episodes)}")
+        logger.info(f"  Total frames: {total_frames}")
+        logger.info(f"  Output: {self.config['output']['base_path']}")
+        logger.info("="*60)
 
     def _convert_episode(self, episode_id: str, episode_index: int, global_frame_offset: int) -> Dict:
         """

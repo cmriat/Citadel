@@ -1,0 +1,123 @@
+{
+  "episode_id": "episode_0002",
+  "trigger_start_time": {
+    "sec": 1764143365,
+    "nanosec": 624264240
+  },
+  "trigger_end_time": {
+    "sec": 1764143374,
+    "nanosec": 162757158
+  },
+  "duration_sec": 8.538492918014526,
+  "arms": {
+    "right_slave": {
+      "namespace": "PZ51C02521000637",
+      "topic": "/PZ51C02521000637/joint_states",
+      "total_frames": 2135,
+      "first_msg_time": {
+        "sec": 1764143365,
+        "nanosec": 623496890
+      },
+      "last_msg_time": {
+        "sec": 1764143374,
+        "nanosec": 159403638
+      },
+      "avg_frequency_hz": 250.1198820586049,
+      "file": "right_slave.parquet",
+      "joints_detected": [
+        "eef_gripper_joint",
+        "gripper_mapping_controller",
+        "joint1",
+        "joint2",
+        "joint3",
+        "joint4",
+        "joint5",
+        "joint6"
+      ]
+    },
+    "right_master": {
+      "namespace": "PZ51C02521000629",
+      "topic": "/PZ51C02521000629/joint_states",
+      "total_frames": 2135,
+      "first_msg_time": {
+        "sec": 1764143365,
+        "nanosec": 625413272
+      },
+      "last_msg_time": {
+        "sec": 1764143374,
+        "nanosec": 161367510
+      },
+      "avg_frequency_hz": 250.11849182011244,
+      "file": "right_master.parquet",
+      "joints_detected": [
+        "eef_gripper_joint",
+        "gripper_mapping_controller",
+        "joint1",
+        "joint2",
+        "joint3",
+        "joint4",
+        "joint5",
+        "joint6"
+      ]
+    },
+    "left_slave": {
+      "namespace": "PZ51C02530000709",
+      "topic": "/PZ51C02530000709/joint_states",
+      "total_frames": 2134,
+      "first_msg_time": {
+        "sec": 1764143365,
+        "nanosec": 629748244
+      },
+      "last_msg_time": {
+        "sec": 1764143374,
+        "nanosec": 161763410
+      },
+      "avg_frequency_hz": 250.11676358808148,
+      "file": "left_slave.parquet",
+      "joints_detected": [
+        "eef_gripper_joint",
+        "gripper_mapping_controller",
+        "joint1",
+        "joint2",
+        "joint3",
+        "joint4",
+        "joint5",
+        "joint6"
+      ]
+    },
+    "left_master": {
+      "namespace": "PZ51C02521000583",
+      "topic": "/PZ51C02521000583/joint_states",
+      "total_frames": 2134,
+      "first_msg_time": {
+        "sec": 1764143365,
+        "nanosec": 629610658
+      },
+      "last_msg_time": {
+        "sec": 1764143374,
+        "nanosec": 161547361
+      },
+      "avg_frequency_hz": 250.11906307621047,
+      "file": "left_master.parquet",
+      "joints_detected": [
+        "eef_gripper_joint",
+        "gripper_mapping_controller",
+        "joint1",
+        "joint2",
+        "joint3",
+        "joint4",
+        "joint5",
+        "joint6"
+      ]
+    }
+  },
+  "validation": {
+    "status": "passed",
+    "timestamp_monotonic": true,
+    "max_frame_count_diff": 1,
+    "warnings": [
+      "right_master: High NaN ratio (7.69%)",
+      "left_master: High NaN ratio (7.69%)"
+    ]
+  }
+}

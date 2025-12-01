@@ -83,7 +83,7 @@ class RedisWorker:
 
             return Path(temp_dir_str).resolve()
         except Exception as e:
-            print(f"⚠️  Failed to read temp_dir from config: {e}, using default")
+            logger.warning(f"Failed to read temp_dir from config: {e}, using default")
             return Path(tempfile.gettempdir()) / 'lerobot_bos'
 
     def _init_bos_modules(self):
@@ -95,7 +95,7 @@ class RedisWorker:
             self._bos_downloader = BosDownloader(self._bos_client)
             self._bos_uploader = BosUploader(self._bos_client)
 
-            print("✓ BOS modules initialized")
+            logger.info("BOS modules initialized")
 
     def process_task(self, task_data: dict, task_queue: TaskQueue) -> bool:
         """处理单个转换任务
@@ -115,10 +115,10 @@ class RedisWorker:
 
         # 2. 检查是否已处理
         if task_queue.is_processed(source, episode_id):
-            print(f"⊘ Already processed: {source}/{episode_id}")
+            logger.info(f"Already processed: {source}/{episode_id}")
             return True
 
-        print(f"🔄 Processing: {source}/{episode_id} (strategy: {strategy})")
+        logger.info(f"Processing: {source}/{episode_id} (strategy: {strategy})")
 
         # 3. 判断数据源类型
         is_bos_source = (source == 'bos')
@@ -130,7 +130,7 @@ class RedisWorker:
         try:
             # 4. 如果是 BOS 数据源，先下载数据
             if is_bos_source:
-                print(f"📥 Downloading from BOS: {episode_id}")
+                logger.info(f"Downloading from BOS: {episode_id}")
                 self._init_bos_modules()
 
                 task_path = self._bos_downloader.download_episode(episode_id)
@@ -140,9 +140,9 @@ class RedisWorker:
                 # 新格式下 data_path 和 images_path 相同
                 local_joints_path = local_images_path = task_path
 
-                print(f"✓ Downloaded:")
-                print(f"  Task directory: {task_path}")
-                print(f"  Episode directory: {task_path / episode_id}")
+                logger.info(f"Downloaded:")
+                logger.info(f"  Task directory: {task_path}")
+                logger.info(f"  Episode directory: {task_path / episode_id}")
 
                 # 使用配置的临时输出目录
                 if self._temp_dir:
@@ -181,13 +181,13 @@ class RedisWorker:
                 converter_config.update(task.config_overrides)
 
             # 9. 创建转换器并执行
-            print(f"🔧 Converting episode {episode_id}...")
+            logger.info(f"Converting episode {episode_id}...")
             converter = LeRobotConverter(converter_config)
             converter.convert(episode_id=episode_id)
 
             # 10. 如果是 BOS 数据源，上传结果
             if is_bos_source and temp_output_dir:
-                print(f"📤 Uploading results to BOS...")
+                logger.info(f"Uploading results to BOS...")
                 upload_success = self._bos_uploader.upload_episode(
                     local_dir=temp_output_dir,
                     episode_id=episode_id,
@@ -197,14 +197,14 @@ class RedisWorker:
                 if not upload_success:
                     raise Exception("Failed to upload results to BOS")
 
-                print(f"✓ Uploaded to BOS")
+                logger.info(f"Uploaded to BOS")
 
             # 11. 标记完成
             task_queue.mark_processed(source, episode_id)
             task_queue.record_stats(source, 'completed')
             task_queue.save_episode_info(source, episode_id, 'completed')
 
-            print(f"✓ Completed: {source}/{episode_id}")
+            logger.info(f"Completed: {source}/{episode_id}")
             return True
 
         except KeyboardInterrupt:
@@ -214,22 +214,21 @@ class RedisWorker:
 
         except Exception as e:
             # 其他异常：记录完整堆栈并标记为失败
-            logger.exception(f"✗ Failed: {source}/{episode_id}")
+            logger.exception(f"Failed: {source}/{episode_id}")
             task_queue.record_stats(source, 'failed')
             task_queue.save_episode_info(source, episode_id, 'failed', str(e))
             task_queue.move_to_failed(task_data)
 
-            print(f"✗ Failed: {source}/{episode_id} - {e}")
             return False
 
         finally:
             # 14. 清理临时文件（如果是 BOS 数据源）
             if is_bos_source:
                 if local_joints_path or local_images_path:
-                    print(f"🧹 Cleaning up downloaded files...")
+                    logger.info(f"Cleaning up downloaded files...")
                     self._bos_downloader.cleanup(episode_id)
 
                 if temp_output_dir and temp_output_dir.exists():
-                    print(f"🧹 Cleaning up temporary output...")
+                    logger.info(f"Cleaning up temporary output...")
                     import shutil
                     shutil.rmtree(temp_output_dir)

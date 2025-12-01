@@ -1,10 +1,13 @@
 """数据清洗和过滤"""
 
+import logging
 from pathlib import Path
 from typing import List, Dict
 import json
 
 from ..utils.path_utils import detect_episode_format
+
+logger = logging.getLogger(__name__)
 
 
 class DataCleaner:
@@ -29,12 +32,12 @@ class DataCleaner:
         Returns:
             有效的 episode ID 列表
         """
-        print("\n🔍 Scanning episodes...")
+        logger.info("Scanning episodes...")
 
         # 扫描所有 episodes
         all_episodes = self._scan_episodes()
 
-        print(f"Found {len(all_episodes)} episodes")
+        logger.info(f"Found {len(all_episodes)} episodes")
 
         # 过滤
         valid_episodes = []
@@ -49,12 +52,12 @@ class DataCleaner:
                 filtered_out.append((ep_id, reason))
 
         # 打印结果
-        print(f"\n✓ Valid episodes: {len(valid_episodes)}")
+        logger.info(f"Valid episodes: {len(valid_episodes)}")
 
         if filtered_out:
-            print(f"✗ Filtered out: {len(filtered_out)}")
+            logger.info(f"Filtered out: {len(filtered_out)}")
             for ep_id, reason in filtered_out:
-                print(f"  - {ep_id}: {reason}")
+                logger.debug(f"  - {ep_id}: {reason}")
 
         return sorted(valid_episodes)
 
