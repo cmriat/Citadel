@@ -7,6 +7,7 @@ import numpy as np
 from tqdm import tqdm
 
 from ..utils import io, timestamp, camera
+from ..utils.path_utils import detect_episode_format
 from ..aligners import NearestAligner, ChunkingAligner, WindowAligner
 from ..writers.parquet import ParquetWriter
 from ..writers.video import VideoEncoder
@@ -54,11 +55,6 @@ class LeRobotConverter:
         self.cameras = self.config['cameras']
         self.base_camera_name = get_base_camera_name(self.config)
 
-        # 数据格式标志（稍后在处理具体 episode 时检测）
-        # 旧格式：data_path/episode_XXXX/*.parquet, images_path/episode_XXXX/cam_*/
-        # 新格式：data_path/episode_XXXX/joints/*.parquet, data_path/episode_XXXX/images/cam_*/
-        self._format_cache = {}  # episode_id -> format_type
-
         print(f"\n{'='*60}")
         print(f"LeRobot v2.1 Converter")
         print(f"{'='*60}")
@@ -79,31 +75,6 @@ class LeRobotConverter:
             return WindowAligner(self.config['alignment'])
         else:
             raise ValueError(f"Unknown strategy: {strategy}")
-
-    def _detect_format(self, episode_id: str) -> str:
-        """检测数据格式（自动兼容新旧格式）
-
-        旧格式：data_path/episode_XXXX/*.parquet, images_path/episode_XXXX/cam_*/
-        新格式：data_path/episode_XXXX/joints/*.parquet, data_path/episode_XXXX/images/cam_*/
-
-        Args:
-            episode_id: Episode ID
-
-        Returns:
-            'legacy' or 'new'
-        """
-        if episode_id in self._format_cache:
-            return self._format_cache[episode_id]
-
-        # 检查新格式特征：episode_XXXX/joints/ 目录是否存在
-        new_format_joints_dir = self.data_path / episode_id / "joints"
-
-        if new_format_joints_dir.exists() and new_format_joints_dir.is_dir():
-            self._format_cache[episode_id] = 'new'
-            return 'new'
-        else:
-            self._format_cache[episode_id] = 'legacy'
-            return 'legacy'
 
     def convert(self, episode_id: str = None):
         """
@@ -226,17 +197,13 @@ class LeRobotConverter:
             }
         """
         arm_data = {}
-        data_format = self._detect_format(episode_id)
 
-        if data_format == 'new':
-            # 新格式：data_path/episode_XXXX/joints/*.parquet
-            ep_dir = self.data_path / episode_id / "joints"
-        else:
-            # 旧格式：data_path/episode_XXXX/*.parquet
-            ep_dir = self.data_path / episode_id
+        # 使用工具函数检测格式并获取数据目录
+        ep_base_dir = self.data_path / episode_id
+        _, ep_data_dir, _ = detect_episode_format(ep_base_dir, self.images_path)
 
         for arm in self.arms:
-            arm_file = ep_dir / arm['file']
+            arm_file = ep_data_dir / arm['file']
             timestamps, states = io.load_joint_data(
                 str(arm_file),
                 joints_dim=self.config['robot']['joints_per_arm']
@@ -260,14 +227,9 @@ class LeRobotConverter:
                 'cam_head': {...}
             }
         """
-        data_format = self._detect_format(episode_id)
-
-        if data_format == 'new':
-            # 新格式：data_path/episode_XXXX/images/
-            ep_images_dir = self.data_path / episode_id / "images"
-        else:
-            # 旧格式：images_path/episode_XXXX/
-            ep_images_dir = self.images_path / episode_id
+        # 使用工具函数检测格式并获取图像目录
+        ep_base_dir = self.data_path / episode_id
+        _, _, ep_images_dir = detect_episode_format(ep_base_dir, self.images_path)
 
         metadata_file = ep_images_dir / 'metadata.json'
         metadata = io.load_json(str(metadata_file))
@@ -296,14 +258,9 @@ class LeRobotConverter:
                 'cam_head': [...]
             }
         """
-        data_format = self._detect_format(episode_id)
-
-        if data_format == 'new':
-            # 新格式：data_path/episode_XXXX/images/
-            ep_images_dir = self.data_path / episode_id / "images"
-        else:
-            # 旧格式：images_path/episode_XXXX/
-            ep_images_dir = self.images_path / episode_id
+        # 使用工具函数检测格式并获取图像目录
+        ep_base_dir = self.data_path / episode_id
+        _, _, ep_images_dir = detect_episode_format(ep_base_dir, self.images_path)
 
         camera_images = {}
         missing_count = 0  # 统计缺失的图像数量

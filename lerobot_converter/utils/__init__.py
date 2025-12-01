@@ -1,6 +1,6 @@
 """Utils module
 
-Provides timestamp processing, IO operations, camera sync and other utilities.
+Provides timestamp processing, IO operations, camera sync, path utilities and other utilities.
 """
 
 from .timestamp import (
@@ -26,6 +26,10 @@ from .io import (
     get_image_list
 )
 
+from .path_utils import (
+    detect_episode_format
+)
+
 __all__ = [
     # Timestamp utilities
     'find_nearest',
@@ -46,4 +50,7 @@ __all__ = [
     'load_joint_data',
     'load_image',
     'get_image_list',
+
+    # Path utilities
+    'detect_episode_format',
 ]

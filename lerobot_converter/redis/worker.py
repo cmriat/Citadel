@@ -1,6 +1,7 @@
 """Redis Worker 核心逻辑"""
 
 import os
+import logging
 import tempfile
 from pathlib import Path
 from typing import Optional
@@ -9,6 +10,8 @@ from ..core.task import ConversionTask
 from ..pipeline.converter import LeRobotConverter
 from ..pipeline.config import load_config
 from .task_queue import TaskQueue
+
+logger = logging.getLogger(__name__)
 
 
 class RedisWorker:
@@ -130,16 +133,16 @@ class RedisWorker:
                 print(f"📥 Downloading from BOS: {episode_id}")
                 self._init_bos_modules()
 
-                download_result = self._bos_downloader.download_episode(episode_id)
-                if not download_result:
+                task_path = self._bos_downloader.download_episode(episode_id)
+                if not task_path:
                     raise Exception("Failed to download episode from BOS")
 
-                # Downloader 返回 (task_path, task_path) 元组（新格式下两个路径相同）
-                local_joints_path, local_images_path = download_result
+                # 新格式下 data_path 和 images_path 相同
+                local_joints_path = local_images_path = task_path
 
-                print(f"✓ Downloaded and reorganized:")
-                print(f"  Task directory: {local_joints_path}")
-                print(f"  Episode directory: {local_joints_path / episode_id if isinstance(local_joints_path, Path) else local_joints_path + '/' + episode_id}")
+                print(f"✓ Downloaded:")
+                print(f"  Task directory: {task_path}")
+                print(f"  Episode directory: {task_path / episode_id}")
 
                 # 使用配置的临时输出目录
                 if self._temp_dir:
@@ -204,17 +207,19 @@ class RedisWorker:
             print(f"✓ Completed: {source}/{episode_id}")
             return True
 
+        except KeyboardInterrupt:
+            # 用户中断：向上传播，不记录为失败
+            logger.info(f"⊘ User interrupted while processing {source}/{episode_id}")
+            raise
+
         except Exception as e:
-            # 12. 记录失败
-            error_msg = str(e)
+            # 其他异常：记录完整堆栈并标记为失败
+            logger.exception(f"✗ Failed: {source}/{episode_id}")
             task_queue.record_stats(source, 'failed')
-            task_queue.save_episode_info(source, episode_id, 'failed', error_msg)
-
-            print(f"✗ Failed: {source}/{episode_id} - {error_msg}")
-
-            # 13. 失败任务移到失败队列
+            task_queue.save_episode_info(source, episode_id, 'failed', str(e))
             task_queue.move_to_failed(task_data)
 
+            print(f"✗ Failed: {source}/{episode_id} - {e}")
             return False
 
         finally:

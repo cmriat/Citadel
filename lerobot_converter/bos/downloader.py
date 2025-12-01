@@ -1,13 +1,12 @@
 """BOS 数据下载器
 
-从 BOS 下载 episode 数据到本地临时目录，并重组织为 converter 期望的格式。
+从 BOS 下载 episode 数据到本地。
 """
 
 import os
-import shutil
 import logging
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from botocore.exceptions import ClientError
 
@@ -52,31 +51,31 @@ class BosDownloader:
         self.retry = self.download_config.get('retry', 3)
         self.retry_delay = self.download_config.get('retry_delay', 5)
 
-    def download_episode(self, episode_id: str) -> Optional[Tuple[Path, Path]]:
-        """下载 episode 数据到本地并重组织为 converter 期望的格式
+    def download_episode(self, episode_id: str) -> Optional[Path]:
+        """下载 episode 数据到本地
 
-        BOS 格式：episode_XXXX/images/ 和 episode_XXXX/joints/
-        本地格式：joints/quad_arm_task/episode_XXXX/ 和 images/quad_arm_task/episode_XXXX/
+        BOS 格式和本地格式一致：
+        task_name/episode_XXXX/
+        ├── images/
+        │   ├── cam_*/...
+        │   └── metadata.json
+        └── joints/
+            ├── *.parquet
+            └── metadata.json
 
         Args:
             episode_id: Episode ID
 
         Returns:
-            Optional[Tuple[Path, Path]]: (joints_base_path, images_base_path)，失败返回 None
-                - joints_base_path: joints/quad_arm_task (converter的data_path)
-                - images_base_path: images/quad_arm_task (converter的images_path)
+            Optional[Path]: task_path (quad_arm_task 目录路径)，失败返回 None
         """
         logger.info(f"Downloading episode {episode_id} from BOS...")
 
-        # 创建临时目录
-        # raw/ 保存原始下载的数据（BOS 格式）
-        # converted/ 保存重组织后的数据（converter 格式）
-        base_dir = self.temp_dir / episode_id
-        raw_dir = base_dir / "raw"
-        converted_dir = base_dir / "converted"
-
-        raw_dir.mkdir(parents=True, exist_ok=True)
-        converted_dir.mkdir(parents=True, exist_ok=True)
+        # 创建目标目录：temp_dir/quad_arm_task/episode_XXXX/
+        task_name = self.bos.get_task_name()
+        task_path = self.temp_dir / task_name
+        episode_dir = task_path / episode_id
+        episode_dir.mkdir(parents=True, exist_ok=True)
 
         # 获取 BOS 上的所有文件（支持分页）
         prefix = f"{self.bos.get_raw_data_prefix()}{episode_id}/"
@@ -120,11 +119,11 @@ class BosDownloader:
         if files_to_download:
             logger.info(f"Sample files: {files_to_download[:3]}")
 
-        # 并发下载到 raw/ 目录
-        logger.info(f"Starting concurrent download to {raw_dir}")
+        # 并发下载到目标位置
+        logger.info(f"Downloading to {episode_dir}")
         with ThreadPoolExecutor(max_workers=self.concurrent) as executor:
             futures = {
-                executor.submit(self._download_file, key, raw_dir, prefix): key
+                executor.submit(self._download_file, key, episode_dir, prefix): key
                 for key in files_to_download
             }
 
@@ -154,139 +153,31 @@ class BosDownloader:
             logger.warning(f"Some files failed to download for episode {episode_id}")
             return None
 
-        # 重组织目录结构
-        try:
-            logger.info("Reorganizing directory structure...")
-            task_path, _ = self._reorganize_directory(
-                raw_dir,  # 使用 raw_dir，不是 raw_dir / episode_id
-                converted_dir,
-                episode_id
-            )
-            logger.info(f"✓ Reorganized directory structure")
-
-            # 验证重组织结果
-            episode_dir = task_path / episode_id
-            joints_dir = episode_dir / "joints"
-            images_dir = episode_dir / "images"
-
-            logger.info(f"  Episode: {episode_dir}")
-
-            if joints_dir.exists():
-                joints_files = list(joints_dir.iterdir())
-                logger.info(f"  - joints/: {len(joints_files)} files")
-                has_joints_meta = (joints_dir / "metadata.json").exists()
-                if has_joints_meta:
-                    logger.info(f"    ✓ metadata.json exists")
-                else:
-                    logger.warning(f"    ⚠️  metadata.json missing!")
-
-            if images_dir.exists():
-                cam_dirs = [d for d in images_dir.iterdir() if d.is_dir()]
-                logger.info(f"  - images/: {len(cam_dirs)} cameras")
-                has_images_meta = (images_dir / "metadata.json").exists()
-                if has_images_meta:
-                    logger.info(f"    ✓ metadata.json exists")
-                else:
-                    logger.warning(f"    ⚠️  metadata.json missing!")
-
-            return task_path, task_path  # 新格式：两个路径相同
-        except Exception as e:
-            logger.error(f"Failed to reorganize directory: {e}")
-            import traceback
-            traceback.print_exc()
-            return None
-
-    def _reorganize_directory(
-        self,
-        raw_episode_dir: Path,
-        converted_base: Path,
-        episode_id: str
-    ) -> Tuple[Path, Path]:
-        """重组织目录结构：从 BOS 格式转换为 converter 新格式
-
-        BOS 格式（输入）：
-            raw_episode_dir/
-            ├── images/
-            │   ├── cam_head/*.jpg
-            │   ├── cam_left/*.jpg
-            │   ├── cam_right/*.jpg
-            │   └── metadata.json
-            └── joints/
-                ├── *.parquet
-                └── metadata.json
-
-        Converter 新格式（输出）：
-            converted_base/quad_arm_task/
-            └── episode_XXXX/
-                ├── images/
-                │   ├── cam_head/*.jpg
-                │   ├── cam_left/*.jpg
-                │   ├── cam_right/*.jpg
-                │   └── metadata.json
-                └── joints/
-                    ├── *.parquet
-                    └── metadata.json
-
-        Args:
-            raw_episode_dir: 原始 episode 目录（BOS 格式）
-            converted_base: 转换后的基础目录
-            episode_id: Episode ID
-
-        Returns:
-            Tuple[Path, Path]: (task_dir, task_dir) - 两个都返回 task_dir，因为新格式下 images 和 joints 在同一目录下
-        """
-        task_name = self.bos.get_task_name()
-
-        # 创建目标目录结构：converted_base/quad_arm_task/episode_XXXX/
-        task_dir = converted_base / task_name
-        episode_dir = task_dir / episode_id
-
+        # 验证下载结果
         joints_dir = episode_dir / "joints"
         images_dir = episode_dir / "images"
 
-        joints_dir.mkdir(parents=True, exist_ok=True)
-        images_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"✓ Download completed: {episode_dir}")
 
-        # 复制 joints 数据
-        raw_joints_dir = raw_episode_dir / "joints"
-        if raw_joints_dir.exists():
-            joints_count = 0
-            for item in raw_joints_dir.iterdir():
-                shutil.copy2(item, joints_dir / item.name)
-                logger.debug(f"  Copied: {item.name}")
-                joints_count += 1
-            logger.info(f"Copied {joints_count} files to {joints_dir}")
+        if joints_dir.exists():
+            joints_files = list(joints_dir.iterdir())
+            logger.info(f"  - joints/: {len(joints_files)} files")
+            has_joints_meta = (joints_dir / "metadata.json").exists()
+            if has_joints_meta:
+                logger.info(f"    ✓ metadata.json exists")
+            else:
+                logger.warning(f"    ⚠️  metadata.json missing!")
 
-        # 复制 images 数据
-        raw_images_dir = raw_episode_dir / "images"
-        if raw_images_dir.exists():
-            cam_count = 0
-            has_metadata = False
-            for item in raw_images_dir.iterdir():
-                if item.is_dir():
-                    # 复制相机目录
-                    target_cam_dir = images_dir / item.name
-                    if target_cam_dir.exists():
-                        shutil.rmtree(target_cam_dir)
-                    shutil.copytree(item, target_cam_dir)
-                    file_count = len(list(target_cam_dir.iterdir()))
-                    logger.info(f"  Copied camera: {item.name} ({file_count} files)")
-                    cam_count += 1
-                elif item.name == 'metadata.json':
-                    # 复制 metadata.json
-                    shutil.copy2(item, images_dir / item.name)
-                    logger.info(f"  Copied: metadata.json")
-                    has_metadata = True
-                else:
-                    # 未知文件类型，记录警告
-                    logger.warning(f"  Unknown item in images/: {item.name}")
+        if images_dir.exists():
+            cam_dirs = [d for d in images_dir.iterdir() if d.is_dir()]
+            logger.info(f"  - images/: {len(cam_dirs)} cameras")
+            has_images_meta = (images_dir / "metadata.json").exists()
+            if has_images_meta:
+                logger.info(f"    ✓ metadata.json exists")
+            else:
+                logger.warning(f"    ⚠️  metadata.json missing!")
 
-            logger.info(f"Copied {cam_count} cameras to {images_dir}")
-            if not has_metadata:
-                logger.warning(f"⚠️  metadata.json not found in {raw_images_dir}")
-
-        # 返回 task_dir（新格式下 data_path 和 images_path 都指向同一个目录）
-        return task_dir, task_dir
+        return task_path
 
     def _download_file(self, key: str, local_base_dir: Path, prefix: str) -> bool:
         """下载单个文件
