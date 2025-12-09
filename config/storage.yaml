@@ -102,15 +102,15 @@ output:
 # 转换配置（默认策略）
 # ============================================================
 conversion:
-  strategy: "chunking"                  # 默认对齐策略
-  output_fps: 30                        # 输出视频帧率
-  chunk_size: 10                        # Action chunking 大小
-  config_template: "config/strategies/chunking.yaml"  # 策略配置模板
+  strategy: "nearest"                   # 默认对齐策略 (nearest/chunking/window)
+  output_fps: 25                        # 输出视频帧率
+  chunk_size: 10                        # Action chunking 大小（nearest 策略不使用此参数）
+  config_template: "config/strategies/nearest.yaml"  # 策略配置模板
 
 # ============================================================
 # 日志配置
 # ============================================================
 logging:
-  level: "INFO"                         # DEBUG, INFO, WARNING, ERROR
+  level: "DEBUG"                        # DEBUG, INFO, WARNING, ERROR
   format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
   file: null                            # 日志文件路径（null 表示只输出到控制台）

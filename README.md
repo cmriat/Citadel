@@ -40,21 +40,33 @@ pixi run python -m lerobot_converter.cli convert \
 ### BOS云端自动化流程
 
 ```bash
-# 1. 设置BOS凭证
+# 1. 启动 Redis（使用 Docker）
+docker run -d --name lerobot-redis -p 6379:6379 -v redis-data:/data redis:latest redis-server --appendonly yes
+
+# 验证 Redis 启动成功
+docker ps | grep redis
+
+# 2. 设置BOS凭证
 export BOS_ACCESS_KEY="your-access-key"
 export BOS_SECRET_KEY="your-secret-key"
 
-# 2. 配置 config/storage.yaml
+# 3. 配置 config/storage.yaml
 # 设置BOS bucket、路径、Redis连接等
 
-# 3. 启动Scanner（扫描BOS新数据并发布任务）
+# 4. 启动Scanner（扫描BOS新数据并发布任务）
+# 此进程会持续运行，每 120 秒扫描一次 BOS
 pixi run scanner
 
-# 4. 启动Worker（处理转换任务）
+# 5. 启动Worker（处理转换任务）
+# 此进程会持续运行，自动从队列拉取任务并处理
 pixi run worker
 
-# 5. 监控队列状态（可选）
+# 6. 监控队列状态（可选）
 pixi run monitor
+
+# 停止服务
+# - Scanner/Worker: 按 Ctrl+C 退出
+# - Redis: docker stop lerobot-redis
 ```
 ---
 ### 最佳实践命令
@@ -114,6 +126,34 @@ export BOS_SECRET_KEY=xxx
 
 # 发布 BOS 上的 episode
 pixi run python -m lerobot_converter.cli publish -e episode_0001 -s bos --strategy chunking
+```
+
+#### 重新处理所有 episodes（清除处理记录）
+```bash
+# 方式1：使用 --full-scan 参数（推荐）
+pixi run python -m lerobot_converter.cli scanner -c config/storage.yaml --full-scan
+
+# 方式2：手动清除 Redis 记录
+docker exec lerobot-redis redis-cli DEL bos:last_scanned_key
+docker exec lerobot-redis redis-cli --scan --pattern "lerobot:processed:bos:*" | xargs -r docker exec -i lerobot-redis redis-cli DEL
+
+# 然后正常启动 Scanner
+pixi run scanner
+```
+
+#### 启动多个 Worker 提高并发处理速度
+```bash
+# 在不同终端分别启动多个 Worker，并行处理队列任务
+# 终端2
+pixi run worker
+
+# 终端3
+pixi run worker
+
+# 终端4
+pixi run worker
+
+# 3个 Worker 可将处理速度提升 3 倍
 ```
 
 ## CLI命令一览

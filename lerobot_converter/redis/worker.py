@@ -161,8 +161,11 @@ class RedisWorker:
                     strategy=strategy
                 )
 
-            # 5. 加载转换配置
-            converter_config = load_config(self.config_template)
+            # 5. 加载转换配置（BOS 场景跳过路径验证）
+            converter_config = load_config(
+                self.config_template,
+                skip_path_validation=is_bos_source
+            )
 
             # 6. 修改输出路径和数据集名称
             converter_config['output']['base_path'] = output_path

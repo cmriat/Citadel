@@ -5,12 +5,13 @@ from pathlib import Path
 from typing import Dict
 
 
-def load_config(config_path: str) -> Dict:
+def load_config(config_path: str, skip_path_validation: bool = False) -> Dict:
     """
     加载 YAML 配置文件
 
     Args:
         config_path: 配置文件路径
+        skip_path_validation: 是否跳过输入路径验证（BOS Worker 场景使用）
 
     Returns:
         配置字典
@@ -24,17 +25,18 @@ def load_config(config_path: str) -> Dict:
         config = yaml.safe_load(f)
 
     # 验证配置
-    validate_config(config)
+    validate_config(config, skip_path_validation=skip_path_validation)
 
     return config
 
 
-def validate_config(config: Dict):
+def validate_config(config: Dict, skip_path_validation: bool = False):
     """
     验证配置文件的完整性
 
     Args:
         config: 配置字典
+        skip_path_validation: 是否跳过输入路径验证（BOS Worker 场景使用）
 
     Raises:
         ValueError: 配置无效时
@@ -77,15 +79,16 @@ def validate_config(config: Dict):
         if 'window_ms' not in config['alignment']:
             raise ValueError("window_ms is required for window strategy")
 
-    # 验证输入路径
-    input_data_path = Path(config['input']['data_path'])
-    input_images_path = Path(config['input']['images_path'])
+    # 验证输入路径（可选跳过，用于 BOS Worker 动态设置路径的场景）
+    if not skip_path_validation:
+        input_data_path = Path(config['input']['data_path'])
+        input_images_path = Path(config['input']['images_path'])
 
-    if not input_data_path.exists():
-        raise FileNotFoundError(f"Data path not found: {input_data_path}")
+        if not input_data_path.exists():
+            raise FileNotFoundError(f"Data path not found: {input_data_path}")
 
-    if not input_images_path.exists():
-        raise FileNotFoundError(f"Images path not found: {input_images_path}")
+        if not input_images_path.exists():
+            raise FileNotFoundError(f"Images path not found: {input_images_path}")
 
     print("✓ Config validation passed")
 
