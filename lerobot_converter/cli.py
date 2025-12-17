@@ -99,11 +99,13 @@ def convert(config, episode_id, strategy, output):
 def worker(config, source, max_workers):
     """启动Redis Worker服务
 
-    从Redis队列消费转换任务并执行。
+    从Redis队列消费转换任务并执行。支持多线程并发处理。
 
     示例：
-      lerobot-convert worker -c config/storage.yaml -s robot_1
+      lerobot-convert worker -c config/storage.yaml -s robot_1 --max-workers 4
     """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    import threading
     from lerobot_converter.redis import RedisClient, TaskQueue, RedisWorker
 
     click.echo(f"📂 Loading config: {config}")
@@ -124,6 +126,9 @@ def worker(config, source, max_workers):
     if max_workers:
         worker_config['max_workers'] = max_workers
 
+    num_workers = worker_config.get('max_workers', 2)
+    poll_interval = worker_config.get('poll_interval', 1)
+
     # 数据源
     if source:
         sources = [source]
@@ -131,7 +136,7 @@ def worker(config, source, max_workers):
         sources = redis_client.get_sources()
 
     click.echo(f"✓ Data sources: {', '.join(sources)}")
-    click.echo(f"✓ Max workers: {worker_config.get('max_workers', 2)}")
+    click.echo(f"✓ Max workers: {num_workers}")
 
     # 创建Worker
     worker_instance = RedisWorker(
@@ -143,17 +148,53 @@ def worker(config, source, max_workers):
 
     task_queue = TaskQueue(redis_client.client, redis_client.get_queue_name())
 
-    click.echo("\n🚀 Starting Redis Worker...")
+    click.echo("\n🚀 Starting Redis Worker Pool...")
     click.echo(f"Queue: {task_queue.queue_name}")
+    click.echo(f"Worker threads: {num_workers}")
     click.echo("Press Ctrl+C to stop\n")
 
+    # 用于控制worker线程的停止标志
+    stop_event = threading.Event()
+
+    def worker_loop(worker_id: int):
+        """单个worker线程的主循环"""
+        logger = logging.getLogger(__name__)
+        logger.info(f"Worker-{worker_id} started")
+
+        while not stop_event.is_set():
+            try:
+                task_data = task_queue.get(timeout=poll_interval)
+                if task_data:
+                    logger.info(f"Worker-{worker_id} processing task...")
+                    worker_instance.process_task(task_data, task_queue)
+                    logger.info(f"Worker-{worker_id} completed task")
+            except KeyboardInterrupt:
+                break
+            except Exception as e:
+                logger.exception(f"Worker-{worker_id} encountered error: {e}")
+
+        logger.info(f"Worker-{worker_id} stopped")
+
     try:
-        while True:
-            task_data = task_queue.get(timeout=worker_config.get('poll_interval', 1))
-            if task_data:
-                worker_instance.process_task(task_data, task_queue)
+        # 创建线程池并启动workers
+        with ThreadPoolExecutor(max_workers=num_workers, thread_name_prefix="Worker") as executor:
+            # 提交所有worker任务
+            futures = [executor.submit(worker_loop, i) for i in range(num_workers)]
+
+            # 等待所有worker完成（或被中断）
+            for future in as_completed(futures):
+                try:
+                    future.result()
+                except KeyboardInterrupt:
+                    stop_event.set()
+                    break
+                except Exception as e:
+                    click.echo(f"❌ Worker error: {e}", err=True)
+
     except KeyboardInterrupt:
-        click.echo("\n\n✓ Worker stopped")
+        click.echo("\n\n⏹ Stopping workers...")
+        stop_event.set()
+        click.echo("✓ All workers stopped")
 
 
 @cli.command()

@@ -37,16 +37,18 @@ cameras:
     target_fps: 30
 
 # ============================================================
-# 输入路径配置
+# 输入路径配置 (仅用于本地转换模式)
 # ============================================================
 input:
+  # 本地原始数据路径 (BOS模式下会自动忽略此配置)
   data_path: "/home/admin01/maoz/lerobot_convert/real_datas/qurd_arm_task"
   images_path: "/home/admin01/maoz/lerobot_convert/real_datas/qurd_arm_task"
 
 # ============================================================
-# 输出配置
+# 输出配置 (仅用于本地转换模式)
 # ============================================================
 output:
+  # 本地输出路径 (BOS模式下会使用临时目录)
   base_path: "./lerobot_dataset_window"
   dataset_name: "airbot_play_dual_arm"
 

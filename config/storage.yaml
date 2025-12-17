@@ -17,7 +17,7 @@ redis:
   consumer_group: "converters"
 
   # 性能配置
-  max_workers: 2              # 最大并发转换数
+  max_workers: 4              # 最大并发转换数
   poll_interval: 1            # 轮询间隔（秒）
   retry_failed: false         # 是否重试失败任务
 
@@ -40,8 +40,8 @@ bos:
 
   # 路径配置
   paths:
-    raw_data: "robot/raw_data/upload_test/online_test/quad_arm_task/"
-    converted: "robot/raw_data/upload_test/converted/"
+    raw_data: "robot/raw_data/upload_test/1216_online_data_upload/fold_laundry/"
+    converted: "robot/raw_data/upload_test/1216_online_data_upload/converted/"
 
   # 任务名称（用于目录重组织）
   task_name: "quad_arm_task"

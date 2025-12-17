@@ -7,8 +7,10 @@
 - **三种对齐策略**: Nearest Neighbor, Action Chunking, Time Window
 - **多相机支持**: 自动同步不同帧率相机（25Hz/30Hz）
 - **云端自动化**: BOS扫描 → 下载 → 转换 → 上传全流程自动化
-- **分布式处理**: Redis任务队列支持多数据源并发处理
+- **高并发处理**: 多线程Worker支持（单进程可配置多个worker线程）
+- **分布式支持**: Redis任务队列支持多数据源、多机器并发处理
 - **统一CLI**: 一个命令行工具管理所有功能
+- **一键启动**: Pixi集成，无需Docker即可启动Redis服务
 
 ## 快速开始
 
@@ -40,11 +42,11 @@ pixi run python -m lerobot_converter.cli convert \
 ### BOS云端自动化流程
 
 ```bash
-# 1. 启动 Redis（使用 Docker）
-docker run -d --name lerobot-redis -p 6379:6379 -v redis-data:/data redis:latest redis-server --appendonly yes
+# 1. 启动 Redis（使用 pixi）
+pixi run start-redis
 
-# 验证 Redis 启动成功
-docker ps | grep redis
+# 验证 Redis 启动成功（在另一个终端）
+pixi run check-redis  # 应该输出 PONG
 
 # 2. 设置BOS凭证
 export BOS_ACCESS_KEY="your-access-key"
@@ -54,19 +56,20 @@ export BOS_SECRET_KEY="your-secret-key"
 # 设置BOS bucket、路径、Redis连接等
 
 # 4. 启动Scanner（扫描BOS新数据并发布任务）
-# 此进程会持续运行，每 120 秒扫描一次 BOS
+# 在新终端运行，此进程会持续运行，每 120 秒扫描一次 BOS
 pixi run scanner
 
 # 5. 启动Worker（处理转换任务）
-# 此进程会持续运行，自动从队列拉取任务并处理
+# 在新终端运行，此进程会持续运行，自动从队列拉取任务并处理
+# 现在支持多线程并发处理（默认8个线程，可在 config/storage.yaml 中配置）
 pixi run worker
 
 # 6. 监控队列状态（可选）
 pixi run monitor
 
 # 停止服务
+# - Redis: 按 Ctrl+C 退出
 # - Scanner/Worker: 按 Ctrl+C 退出
-# - Redis: docker stop lerobot-redis
 ```
 ---
 ### 最佳实践命令
@@ -106,11 +109,11 @@ pixi run python -m lerobot_converter.cli scanner -c config/storage.yaml --full-s
 export BOS_ACCESS_KEY=xxx
 export BOS_SECRET_KEY=xxx
 
-# 启动 worker（默认2个并发）
-pixi run python -m lerobot_converter.cli worker -c config/storage.yaml
+# 启动 worker（默认配置为8个并发线程）
+pixi run worker
 
-# 指定并发数
-pixi run python -m lerobot_converter.cli worker -c config/storage.yaml --max-workers 4
+# 指定并发数（会覆盖配置文件中的设置）
+pixi run worker --max-workers 4
 ```
 
 **终端3 - Monitor（监控队列，可选）**
@@ -134,16 +137,24 @@ pixi run python -m lerobot_converter.cli publish -e episode_0001 -s bos --strate
 pixi run python -m lerobot_converter.cli scanner -c config/storage.yaml --full-scan
 
 # 方式2：手动清除 Redis 记录
-docker exec lerobot-redis redis-cli DEL bos:last_scanned_key
-docker exec lerobot-redis redis-cli --scan --pattern "lerobot:processed:bos:*" | xargs -r docker exec -i lerobot-redis redis-cli DEL
+redis-cli DEL bos:last_scanned_key
+redis-cli --scan --pattern "lerobot:processed:bos:*" | xargs -r redis-cli DEL
 
 # 然后正常启动 Scanner
 pixi run scanner
 ```
 
-#### 启动多个 Worker 提高并发处理速度
+#### 提高并发处理速度
 ```bash
-# 在不同终端分别启动多个 Worker，并行处理队列任务
+# 方式1：配置多个worker线程（推荐）
+# 单个Worker进程内使用多个线程并发处理
+pixi run worker --max-workers 8
+
+# 或在 config/storage.yaml 中配置 max_workers: 8
+pixi run worker
+
+# 方式2：启动多个Worker进程（适用于多机分布式场景）
+# 在不同终端或不同机器上分别启动多个Worker进程
 # 终端2
 pixi run worker
 
@@ -153,19 +164,26 @@ pixi run worker
 # 终端4
 pixi run worker
 
-# 3个 Worker 可将处理速度提升 3 倍
+# 注意：方式1和方式2可以结合使用，例如3个进程 × 8个线程 = 24个并发任务
 ```
 
 ## CLI命令一览
 
 ```bash
+# Redis服务管理
+pixi run start-redis                                  # 启动Redis服务
+pixi run check-redis                                  # 检查Redis服务状态
+
 # 本地转换
+pixi run convert-nearest                              # Nearest策略快捷命令
+pixi run convert-chunking                             # Chunking策略快捷命令
+pixi run convert-window                               # Window策略快捷命令
 pixi run python -m lerobot_converter.cli convert -c CONFIG_PATH
 
 # BOS自动化
-pixi run python -m lerobot_converter.cli scanner     # 扫描BOS新数据
-pixi run python -m lerobot_converter.cli worker      # 处理转换任务
-pixi run python -m lerobot_converter.cli monitor     # 监控队列状态
+pixi run scanner                                      # 扫描BOS新数据
+pixi run worker                                       # 处理转换任务（多线程）
+pixi run monitor                                      # 监控队列状态
 pixi run python -m lerobot_converter.cli publish     # 手动发布任务
 
 # 查看帮助

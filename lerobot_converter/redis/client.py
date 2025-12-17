@@ -62,7 +62,18 @@ class RedisClient:
 
     def get_worker_config(self) -> dict:
         """获取 Worker 配置"""
-        return self.config.get('worker', {})
+        # 优先查找 top-level 'worker' (兼容性), 否则从 'redis' 部分提取
+        if 'worker' in self.config:
+            return self.config['worker']
+        
+        # 从 redis 配置中提取 worker 相关配置
+        redis_conf = self.config.get('redis', {})
+        return {
+            'max_workers': redis_conf.get('max_workers', 2),
+            'poll_interval': redis_conf.get('poll_interval', 1),
+            'retry_failed': redis_conf.get('retry_failed', False),
+            'retention_days': redis_conf.get('retention_days', 30)
+        }
 
     def get_conversion_config(self) -> dict:
         """获取转换配置"""

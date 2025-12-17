@@ -14,6 +14,7 @@ opencv = ">=4.8.0"
 pillow = ">=10.0.0"
 pyyaml = ">=6.0"
 tqdm = ">=4.65.0"
+redis-server = "*"
 
 [pypi-dependencies]
 redis = ">=5.0.0"
@@ -34,12 +35,19 @@ dev = ["dev"]
 # =============================================================================
 # 统一CLI入口（推荐使用）
 # =============================================================================
+# 启动 Redis 服务
+start-redis = "redis-server --port 6379 --appendonly yes"
+
+# 检查 Redis 服务状态
+check-redis = "redis-cli ping"
+
 # 本地数据转换 - 三种对齐策略
 convert-nearest = "python -m lerobot_converter.cli convert --config config/strategies/nearest.yaml"
 convert-chunking = "python -m lerobot_converter.cli convert --config config/strategies/chunking.yaml"
 convert-window = "python -m lerobot_converter.cli convert --config config/strategies/window.yaml"
 
 # Redis Worker - 处理队列中的转换任务
+# 注意: 需要在环境中设置 BOS_ACCESS_KEY 和 BOS_SECRET_KEY
 worker = "python -m lerobot_converter.cli worker --config config/storage.yaml"
 
 # BOS Scanner - 扫描BOS上的新episodes并发布任务

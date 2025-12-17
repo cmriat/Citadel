@@ -33,6 +33,7 @@ nohup.out
 *.rdb
 *.aof
 dump.rdb
+appendonlydir/
 
 # SQLite
 *.db

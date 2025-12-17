@@ -39,6 +39,13 @@ class BosClient:
         bos_config['access_key'] = os.path.expandvars(bos_config['access_key'])
         bos_config['secret_key'] = os.path.expandvars(bos_config['secret_key'])
 
+        # DEBUG: 检查密钥是否正确加载
+        ak = bos_config['access_key']
+        if ak.startswith("${"):
+            logger.error("❌ CRITICAL: Environment variables BOS_ACCESS_KEY is NOT set! Using literal string.")
+        else:
+            logger.info(f"✓ Loaded Access Key: {ak[:6]}... (Length: {len(ak)})")
+
         return config
 
     def _create_client(self):
@@ -53,7 +60,7 @@ class BosClient:
             region_name=bos_config.get('region', 'bj'),
             config=Config(
                 signature_version='s3v4',
-                s3={'addressing_style': 'virtual'}  # 使用虚拟主机风格
+                s3={'addressing_style': 'path'}  # 强制使用 path style
             )
         )
 
