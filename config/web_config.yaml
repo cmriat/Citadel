@@ -1,0 +1,24 @@
+bos:
+  access_key: ALTAKWzYq1SJf8JQ63fuuzVQSI
+  bucket: srgdata
+  endpoint: https://s3.bj.bcebos.com
+  region: bj
+  secret_key: 7654305587b24455bd534fa5ee210b11
+conversion:
+  chunk_size: 10
+  fps: 30
+  strategy: nearest
+  tolerance_ms: 20
+paths:
+  converted: robot/raw_data/upload_test/1217_online_data_test/converted_test/
+  raw_data: robot/raw_data/upload_test/1217_online_data_test/fold_laundry/
+  task_name: fold_laundry
+redis:
+  db: 0
+  host: localhost
+  password: null
+  port: 6379
+scanner:
+  interval: 120
+  min_file_count: 1
+  stable_time: 10
