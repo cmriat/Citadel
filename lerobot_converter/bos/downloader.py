@@ -121,6 +121,9 @@ class BosDownloader:
 
         # 并发下载到目标位置
         logger.info(f"Downloading to {episode_dir}")
+        # 单文件下载超时时间（秒）
+        file_timeout = self.download_config.get('file_timeout', 300)
+
         with ThreadPoolExecutor(max_workers=self.concurrent) as executor:
             futures = {
                 executor.submit(self._download_file, key, episode_dir, prefix): key
@@ -129,13 +132,16 @@ class BosDownloader:
 
             success_count = 0
             failed_files = []
-            for future in as_completed(futures):
+            for future in as_completed(futures, timeout=file_timeout * len(files_to_download)):
                 key = futures[future]
                 try:
-                    if future.result():
+                    if future.result(timeout=file_timeout):
                         success_count += 1
                     else:
                         failed_files.append(key)
+                except TimeoutError:
+                    logger.error(f"Download timeout for {key}")
+                    failed_files.append(key)
                 except Exception as e:
                     logger.error(f"Failed to download {key}: {e}")
                     failed_files.append(key)
@@ -233,7 +239,9 @@ class BosDownloader:
         Args:
             episode_id: Episode ID
         """
-        local_dir = self.temp_dir / episode_id
+        # 实际下载路径是 temp_dir/task_name/episode_id
+        task_name = self.bos.get_task_name()
+        local_dir = self.temp_dir / task_name / episode_id
 
         if local_dir.exists():
             import shutil

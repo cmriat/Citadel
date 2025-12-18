@@ -11,12 +11,14 @@ import numpy as np
 class ParquetWriter:
     """LeRobot Parquet 格式写入器"""
 
-    def __init__(self, output_path: str):
+    def __init__(self, output_path: str, fps: float = 25.0):
         """
         Args:
             output_path: 输出目录路径
+            fps: 视频帧率（用于计算视频时间戳）
         """
         self.output_path = Path(output_path)
+        self.fps = fps
         self.data_dir = self.output_path / "data" / "chunk-000"
         self.data_dir.mkdir(parents=True, exist_ok=True)
 
@@ -96,8 +98,8 @@ class ParquetWriter:
         video_path = f"videos/chunk-000/observation.images.{camera_name}/episode_{episode_index:06d}.mp4"
 
         # 计算视频时间戳（秒，从 episode 开始）
-        # 这里简化处理，使用帧索引 × 帧间隔
-        video_timestamp = camera_info['index'] / 25.0  # 假设 25 FPS
+        # 使用帧索引 × 帧间隔
+        video_timestamp = camera_info['index'] / self.fps
 
         return {
             'path': video_path,

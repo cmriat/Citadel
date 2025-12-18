@@ -3,6 +3,8 @@
 import os
 import logging
 import tempfile
+import hashlib
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -47,11 +49,15 @@ class RedisWorker:
         self._bos_client = None
         self._bos_downloader = None
         self._bos_uploader = None
+        self._bos_init_lock = threading.Lock()  # 线程锁保护 BOS 初始化
 
         # 获取临时目录配置（用于BOS转换）
         self._temp_dir = None
+        # 命名空间（用于 Redis 键隔离）
+        self._namespace = None
         if bos_config_path:
             self._temp_dir = self._get_temp_dir_from_config()
+            self._namespace = self._generate_namespace_from_config()
 
     def _get_temp_dir_from_config(self) -> Path:
         """从BOS配置文件读取临时目录配置
@@ -86,16 +92,49 @@ class RedisWorker:
             logger.warning(f"Failed to read temp_dir from config: {e}, using default")
             return Path(tempfile.gettempdir()) / 'lerobot_bos'
 
+    def _generate_namespace_from_config(self) -> Optional[str]:
+        """从BOS配置文件生成命名空间
+
+        与 Scanner 使用相同的逻辑，确保命名空间一致。
+
+        Returns:
+            Optional[str]: 命名空间字符串，如果配置不存在则返回 None
+        """
+        import yaml
+
+        try:
+            with open(self.bos_config_path, 'r') as f:
+                config = yaml.safe_load(f)
+
+            raw_data_prefix = config.get('bos', {}).get('paths', {}).get('raw_data', '')
+            converted_prefix = config.get('bos', {}).get('paths', {}).get('converted', '')
+
+            # 组合 raw_data 和 converted 路径
+            path_str = f"{raw_data_prefix}|{converted_prefix}"
+            # 生成短 hash（取前8位）
+            hash_value = hashlib.md5(path_str.encode()).hexdigest()[:8]
+            logger.info(f"Generated namespace: {hash_value} (from paths: {raw_data_prefix}, {converted_prefix})")
+            return hash_value
+        except Exception as e:
+            logger.warning(f"Failed to generate namespace from config: {e}")
+            return None
+
     def _init_bos_modules(self):
-        """初始化 BOS 模块（延迟加载）"""
-        if self._bos_client is None and self.bos_config_path:
-            from ..bos import BosClient, BosDownloader, BosUploader
+        """初始化 BOS 模块（延迟加载，线程安全）"""
+        # 快速检查避免不必要的锁获取
+        if self._bos_client is not None:
+            return
 
-            self._bos_client = BosClient(self.bos_config_path)
-            self._bos_downloader = BosDownloader(self._bos_client)
-            self._bos_uploader = BosUploader(self._bos_client)
+        with self._bos_init_lock:
+            # 双重检查锁定模式（Double-Checked Locking）
+            if self._bos_client is None and self.bos_config_path:
+                from ..bos import BosClient, BosDownloader, BosUploader
 
-            logger.info("BOS modules initialized")
+                self._bos_client = BosClient(self.bos_config_path)
+                self._bos_downloader = BosDownloader(self._bos_client)
+                self._bos_uploader = BosUploader(self._bos_client)
+
+                logger.info("BOS modules initialized")
 
     def process_task(self, task_data: dict, task_queue: TaskQueue) -> bool:
         """处理单个转换任务
@@ -113,8 +152,9 @@ class RedisWorker:
         source = task.source
         strategy = task.strategy.value
 
-        # 2. 检查是否已处理
-        if task_queue.is_processed(source, episode_id):
+        # 2. 检查是否已处理（对于 BOS 数据源使用命名空间）
+        namespace = self._namespace if source == 'bos' else None
+        if task_queue.is_processed(source, episode_id, namespace=namespace):
             logger.info(f"Already processed: {source}/{episode_id}")
             return True
 
@@ -202,8 +242,8 @@ class RedisWorker:
 
                 logger.info(f"Uploaded to BOS")
 
-            # 11. 标记完成
-            task_queue.mark_processed(source, episode_id)
+            # 11. 标记完成（对于 BOS 数据源使用命名空间）
+            task_queue.mark_processed(source, episode_id, namespace=namespace)
             task_queue.record_stats(source, 'completed')
             task_queue.save_episode_info(source, episode_id, 'completed')
 
@@ -211,8 +251,9 @@ class RedisWorker:
             return True
 
         except KeyboardInterrupt:
-            # 用户中断：向上传播，不记录为失败
-            logger.info(f"⊘ User interrupted while processing {source}/{episode_id}")
+            # 用户中断：将任务放回队列，不记录为失败
+            logger.info(f"⊘ User interrupted while processing {source}/{episode_id}, requeuing task...")
+            task_queue.requeue(task_data)
             raise
 
         except Exception as e:
@@ -227,11 +268,19 @@ class RedisWorker:
         finally:
             # 14. 清理临时文件（如果是 BOS 数据源）
             if is_bos_source:
+                # 清理下载的文件
                 if local_joints_path or local_images_path:
-                    logger.info(f"Cleaning up downloaded files...")
-                    self._bos_downloader.cleanup(episode_id)
+                    try:
+                        logger.info(f"Cleaning up downloaded files...")
+                        self._bos_downloader.cleanup(episode_id)
+                    except Exception as cleanup_error:
+                        logger.warning(f"Failed to cleanup downloaded files for {episode_id}: {cleanup_error}")
 
+                # 清理临时输出目录
                 if temp_output_dir and temp_output_dir.exists():
-                    logger.info(f"Cleaning up temporary output...")
-                    import shutil
-                    shutil.rmtree(temp_output_dir)
+                    try:
+                        logger.info(f"Cleaning up temporary output...")
+                        import shutil
+                        shutil.rmtree(temp_output_dir)
+                    except Exception as cleanup_error:
+                        logger.warning(f"Failed to cleanup temp output dir {temp_output_dir}: {cleanup_error}")

@@ -1,8 +1,11 @@
 """配置加载和验证"""
 
+import logging
 import yaml
 from pathlib import Path
 from typing import Dict
+
+logger = logging.getLogger(__name__)
 
 
 def load_config(config_path: str, skip_path_validation: bool = False) -> Dict:
@@ -74,10 +77,43 @@ def validate_config(config: Dict, skip_path_validation: bool = False):
     if strategy == 'chunking':
         if 'chunk_size' not in config['alignment']:
             raise ValueError("chunk_size is required for chunking strategy")
+        chunk_size = config['alignment']['chunk_size']
+        if not isinstance(chunk_size, int) or chunk_size <= 0:
+            raise ValueError(f"chunk_size must be a positive integer, got: {chunk_size}")
 
     if strategy == 'window':
         if 'window_ms' not in config['alignment']:
             raise ValueError("window_ms is required for window strategy")
+        window_ms = config['alignment']['window_ms']
+        if not isinstance(window_ms, (int, float)) or window_ms <= 0:
+            raise ValueError(f"window_ms must be a positive number, got: {window_ms}")
+
+    # 验证 tolerance_ms（所有策略都需要）
+    tolerance_ms = config['alignment'].get('tolerance_ms')
+    if tolerance_ms is not None:
+        if not isinstance(tolerance_ms, (int, float)) or tolerance_ms <= 0:
+            raise ValueError(f"tolerance_ms must be a positive number, got: {tolerance_ms}")
+
+    # 验证 video 配置（如果存在）
+    if 'video' in config:
+        fps = config['video'].get('fps')
+        if fps is not None:
+            if not isinstance(fps, (int, float)) or fps <= 0:
+                raise ValueError(f"video.fps must be a positive number, got: {fps}")
+        codec = config['video'].get('codec')
+        if codec is not None and not isinstance(codec, str):
+            raise ValueError(f"video.codec must be a string, got: {type(codec).__name__}")
+
+    # 验证 filtering 配置（如果存在）
+    if 'filtering' in config:
+        min_frames = config['filtering'].get('min_frames')
+        if min_frames is not None:
+            if not isinstance(min_frames, int) or min_frames < 0:
+                raise ValueError(f"filtering.min_frames must be a non-negative integer, got: {min_frames}")
+        max_time_gap_ms = config['filtering'].get('max_time_gap_ms')
+        if max_time_gap_ms is not None:
+            if not isinstance(max_time_gap_ms, (int, float)) or max_time_gap_ms <= 0:
+                raise ValueError(f"filtering.max_time_gap_ms must be a positive number, got: {max_time_gap_ms}")
 
     # 验证输入路径（可选跳过，用于 BOS Worker 动态设置路径的场景）
     if not skip_path_validation:
@@ -90,7 +126,7 @@ def validate_config(config: Dict, skip_path_validation: bool = False):
         if not input_images_path.exists():
             raise FileNotFoundError(f"Images path not found: {input_images_path}")
 
-    print("✓ Config validation passed")
+    logger.debug("Config validation passed")
 
 
 def get_arm_config(config: Dict, arm_name: str) -> Dict:

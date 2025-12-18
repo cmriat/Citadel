@@ -242,9 +242,16 @@ def scanner(config, interval, once, full_scan):
     # 处理full-scan标志
     if full_scan:
         scanner_config = bos_client.get_scanner_config()
-        incremental_key = scanner_config.get('incremental_key', 'bos:last_scanned_key')
+        base_incremental_key = scanner_config.get('incremental_key', 'bos:last_scanned_key')
+        # 生成与 scanner 相同的命名空间（基于 BOS 路径）
+        import hashlib
+        raw_data_prefix = bos_client.get_raw_data_prefix()
+        converted_prefix = bos_client.get_converted_prefix()
+        path_str = f"{raw_data_prefix}|{converted_prefix}"
+        namespace = hashlib.md5(path_str.encode()).hexdigest()[:8]
+        incremental_key = f"{base_incremental_key}:{namespace}"
         redis_client.client.delete(incremental_key)
-        click.echo("✓ Full scan mode enabled")
+        click.echo(f"✓ Full scan mode enabled (cleared key: {incremental_key})")
 
     # 获取扫描间隔
     scan_interval = interval if interval else bos_client.get_scanner_config().get('interval', 120)
@@ -323,8 +330,7 @@ def publish(config, episode, source, strategy):
     task = ConversionTask(
         episode_id=episode,
         source=source,
-        strategy=strategy_enum,
-        priority=1
+        strategy=strategy_enum
     )
 
     # 发布任务

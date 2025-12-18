@@ -25,18 +25,24 @@ class NearestAligner(BaseAligner):
             left_slave_idx = self._find_nearest(arm_data['left_slave']['timestamps'], img_ts)
             right_slave_idx = self._find_nearest(arm_data['right_slave']['timestamps'], img_ts)
 
-            # 检查时间容差
-            if abs(arm_data['left_slave']['timestamps'][left_slave_idx] - img_ts) > tolerance_ns:
+            # 2. 对齐 master 臂 (observation.state.master)
+            left_master_idx = self._find_nearest(arm_data['left_master']['timestamps'], img_ts)
+            right_master_idx = self._find_nearest(arm_data['right_master']['timestamps'], img_ts)
+
+            # 检查所有臂的时间容差
+            time_diffs = [
+                abs(arm_data['left_slave']['timestamps'][left_slave_idx] - img_ts),
+                abs(arm_data['right_slave']['timestamps'][right_slave_idx] - img_ts),
+                abs(arm_data['left_master']['timestamps'][left_master_idx] - img_ts),
+                abs(arm_data['right_master']['timestamps'][right_master_idx] - img_ts),
+            ]
+            if any(diff > tolerance_ns for diff in time_diffs):
                 continue
 
             obs_slave = self._concat_arms(
                 arm_data['left_slave']['states'][left_slave_idx],
                 arm_data['right_slave']['states'][right_slave_idx]
             )  # (14,)
-
-            # 2. 对齐 master 臂 (observation.state.master)
-            left_master_idx = self._find_nearest(arm_data['left_master']['timestamps'], img_ts)
-            right_master_idx = self._find_nearest(arm_data['right_master']['timestamps'], img_ts)
 
             obs_master = self._concat_arms(
                 arm_data['left_master']['states'][left_master_idx],

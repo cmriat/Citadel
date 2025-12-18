@@ -44,7 +44,7 @@ bos:
     converted: "robot/raw_data/upload_test/1216_online_data_upload/converted/"
 
   # 任务名称（用于目录重组织）
-  task_name: "quad_arm_task"
+  task_name: "fold_laundry"
 
   # 扫描配置
   scanner:
@@ -60,6 +60,7 @@ bos:
       - "images"
       - "joints"
     check_count_match: false            # 新格式关闭数量匹配检查
+    reference_camera: "cam_left"        # 参考相机名称（用于数量匹配检查）
     count_tolerance: 0
     stable_time: 10                     # 上传稳定性检查（秒）
     min_file_count: 1                   # 每个目录最少文件数

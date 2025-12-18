@@ -52,6 +52,12 @@ class BosClient:
         """创建 boto3 S3 客户端连接到 BOS"""
         bos_config = self.config['bos']
 
+        # 计算连接池大小：基于下载/上传并发数
+        download_concurrent = bos_config.get('download', {}).get('concurrent', 4)
+        upload_concurrent = bos_config.get('upload', {}).get('concurrent', 4)
+        # 连接池大小 = 最大并发数 * 2 + 余量，确保足够
+        max_pool_connections = max(download_concurrent, upload_concurrent) * 2 + 10
+
         client = boto3.client(
             's3',
             endpoint_url=bos_config['endpoint'],
@@ -60,10 +66,12 @@ class BosClient:
             region_name=bos_config.get('region', 'bj'),
             config=Config(
                 signature_version='s3v4',
-                s3={'addressing_style': 'path'}  # 强制使用 path style
+                s3={'addressing_style': 'path'},  # 强制使用 path style
+                max_pool_connections=max_pool_connections  # 增加连接池大小
             )
         )
 
+        logger.info(f"BOS client created with max_pool_connections={max_pool_connections}")
         return client
 
     def test_connection(self) -> bool:

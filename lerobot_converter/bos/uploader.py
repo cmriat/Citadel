@@ -70,6 +70,10 @@ class BosUploader:
             return False
 
         # 并发上传
+        # 单文件上传超时时间（秒）
+        file_timeout = self.upload_config.get('file_timeout', 300)
+        failed_files = []
+
         with ThreadPoolExecutor(max_workers=self.concurrent) as executor:
             futures = {
                 executor.submit(
@@ -82,15 +86,23 @@ class BosUploader:
             }
 
             success_count = 0
-            for future in as_completed(futures):
+            for future in as_completed(futures, timeout=file_timeout * len(files_to_upload)):
                 file_path = futures[future]
                 try:
-                    if future.result():
+                    if future.result(timeout=file_timeout):
                         success_count += 1
+                    else:
+                        failed_files.append(file_path)
+                except TimeoutError:
+                    logger.error(f"Upload timeout for {file_path}")
+                    failed_files.append(file_path)
                 except Exception as e:
                     logger.error(f"Failed to upload {file_path}: {e}")
+                    failed_files.append(file_path)
 
         logger.info(f"Uploaded {success_count}/{len(files_to_upload)} files")
+        if failed_files:
+            logger.error(f"Failed files: {[str(f) for f in failed_files[:10]]}")
 
         upload_success = success_count == len(files_to_upload)
 

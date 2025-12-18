@@ -52,7 +52,7 @@ def load_joint_data(file_path: str, joints_dim: int = 7) -> Tuple[np.ndarray, np
     # 处理 NaN 值（前向填充）
     if np.any(np.isnan(states)):
         df_states = pd.DataFrame(states)
-        df_states = df_states.fillna(method='ffill').fillna(method='bfill')
+        df_states = df_states.ffill().bfill()
         states = df_states.values.astype(np.float32)
 
     return timestamps, states

@@ -37,7 +37,10 @@ class LeRobotConverter:
         # 初始化组件
         self.cleaner = DataCleaner(self.config)
         self.aligner = self._create_aligner()
-        self.parquet_writer = ParquetWriter(self.config['output']['base_path'])
+        self.parquet_writer = ParquetWriter(
+            self.config['output']['base_path'],
+            fps=self.config['video']['fps']
+        )
         self.video_encoder = VideoEncoder(
             self.config['output']['base_path'],
             fps=self.config['video']['fps'],
@@ -98,14 +101,26 @@ class LeRobotConverter:
         # 转换所有 episodes
         all_episodes_info = []
         global_frame_offset = 0
+        failed_episodes = []
 
         logger.info(f"Converting {len(valid_episodes)} episodes...")
 
         for ep_idx, ep_id in enumerate(tqdm(valid_episodes, desc="Converting")):
-            episode_info = self._convert_episode(ep_id, ep_idx, global_frame_offset)
+            try:
+                episode_info = self._convert_episode(ep_id, ep_idx, global_frame_offset)
+                all_episodes_info.append(episode_info)
+                global_frame_offset += episode_info['length']
+            except Exception as e:
+                logger.error(f"Failed to convert episode {ep_id}: {e}")
+                failed_episodes.append(ep_id)
+                continue  # 继续处理其他 episodes
 
-            all_episodes_info.append(episode_info)
-            global_frame_offset += episode_info['length']
+        if failed_episodes:
+            logger.warning(f"Failed to convert {len(failed_episodes)} episodes: {failed_episodes}")
+
+        if not all_episodes_info:
+            logger.error("All episodes failed to convert!")
+            return
 
         # 生成元数据
         total_frames = sum(ep['length'] for ep in all_episodes_info)
