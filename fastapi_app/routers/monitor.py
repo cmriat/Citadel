@@ -2,10 +2,12 @@
 
 import logging
 import asyncio
+import os
 from typing import List
 from datetime import datetime
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from pydantic import BaseModel
 
 from ..schemas.models import QueueStats, EpisodeInfo, EpisodeListResponse
 from ..services.scanner_service import scanner_service
@@ -17,6 +19,18 @@ router = APIRouter()
 
 # WebSocket 连接管理
 _websocket_connections: List[WebSocket] = []
+
+
+class SystemStats(BaseModel):
+    """系统资源统计"""
+    cpu_percent: float = 0.0
+    cpu_count: int = 1
+    memory_total: int = 0
+    memory_used: int = 0
+    memory_percent: float = 0.0
+    disk_total: int = 0
+    disk_used: int = 0
+    disk_percent: float = 0.0
 
 
 async def broadcast_log(message: str):
@@ -116,14 +130,32 @@ async def get_episodes(limit: int = 20, offset: int = 0):
         # 分页
         paginated_keys = completed_keys[offset:offset + limit]
 
+        # 获取配置中的路径用于构建完整路径
+        raw_data_path = config.paths.raw_data.rstrip('/')
+        converted_path = config.paths.converted.rstrip('/')
+        bucket = config.bos.bucket
+
         for key in paginated_keys:
             try:
                 data = r.hgetall(key)
                 if data:
+                    # 从 key 中解析 source 和 episode_id
+                    # key 格式: lerobot:episode:{source}:{episode_id}
+                    key_parts = key.split(":")
+                    source = key_parts[2] if len(key_parts) > 2 else ""
+                    episode_id = key_parts[3] if len(key_parts) > 3 else data.get("episode_id", "")
+
+                    # 构建源和目标路径
+                    source_path = f"bos://{bucket}/{raw_data_path}/{episode_id}" if raw_data_path else ""
+                    target_path = f"bos://{bucket}/{converted_path}/{episode_id}" if converted_path else ""
+
                     episodes.append(EpisodeInfo(
-                        episode_id=data.get("episode_id", key.split(":")[-1]),
+                        episode_id=episode_id,
                         status=data.get("status", "unknown"),
                         timestamp=data.get("timestamp", ""),
+                        source=source,
+                        source_path=source_path,
+                        target_path=target_path,
                         strategy=data.get("strategy"),
                         frames=int(data.get("frames", 0)) if data.get("frames") else None,
                         error=data.get("error")
@@ -176,3 +208,44 @@ async def websocket_logs(websocket: WebSocket):
         worker_service.remove_log_callback(sync_log_callback)
         if websocket in _websocket_connections:
             _websocket_connections.remove(websocket)
+
+
+@router.get("/system", response_model=SystemStats)
+async def get_system_stats():
+    """获取系统资源统计"""
+    try:
+        import psutil
+
+        # CPU
+        cpu_percent = psutil.cpu_percent(interval=0.1)
+        cpu_count = psutil.cpu_count()
+
+        # 内存
+        mem = psutil.virtual_memory()
+        memory_total = mem.total
+        memory_used = mem.used
+        memory_percent = mem.percent
+
+        # 磁盘 (根目录)
+        disk = psutil.disk_usage('/')
+        disk_total = disk.total
+        disk_used = disk.used
+        disk_percent = disk.percent
+
+        return SystemStats(
+            cpu_percent=cpu_percent,
+            cpu_count=cpu_count,
+            memory_total=memory_total,
+            memory_used=memory_used,
+            memory_percent=memory_percent,
+            disk_total=disk_total,
+            disk_used=disk_used,
+            disk_percent=disk_percent
+        )
+
+    except ImportError:
+        logger.warning("psutil not installed, returning empty stats")
+        return SystemStats(cpu_count=os.cpu_count() or 1)
+    except Exception as e:
+        logger.error(f"Failed to get system stats: {e}")
+        return SystemStats(cpu_count=os.cpu_count() or 1)

@@ -36,6 +36,17 @@ class ScannerService:
             "skipped": 0
         }
 
+        # 扫描进度
+        self._scan_progress = {
+            "scanning": False,
+            "phase": "",  # "listing", "validating", "publishing"
+            "current": 0,
+            "total": 0,
+            "message": "",
+            "start_time": None,  # 阶段开始时间
+            "eta_seconds": None  # 预估剩余时间（秒）
+        }
+
         # 日志回调
         self._log_callbacks: List[Callable[[str], None]] = []
 
@@ -79,6 +90,11 @@ class ScannerService:
         from lerobot_converter.bos.client import BosClient
         from lerobot_converter.redis.task_queue import TaskQueue
         from lerobot_converter.bos.scanner import EpisodeScanner
+
+        # 获取配置信息用于日志显示
+        bucket = self._config.get("bos", {}).get("bucket", "")
+        raw_data_path = self._config.get("paths", {}).get("raw_data", "")
+        self._scan_path = f"bos://{bucket}/{raw_data_path}"
 
         # 获取 strategy 并确保是字符串
         strategy = self._config.get("conversion", {}).get("strategy", "nearest")
@@ -149,7 +165,7 @@ class ScannerService:
         self._redis_client = redis_client
         self._storage_config = storage_config
 
-        self._emit_log("✓ BOS and Redis clients initialized")
+        self._emit_log(f"✓ 连接成功 → {self._scan_path}")
 
     def start(self, mode: str = "continuous", interval: int = 120, full_scan: bool = False):
         """启动扫描服务
@@ -181,6 +197,7 @@ class ScannerService:
             self._thread.start()
 
             self._emit_log(f"▶ Scanner started ({mode} mode, interval={interval}s)")
+            self._emit_log(f"📂 扫描目录: {getattr(self, '_scan_path', 'N/A')}")
             return True
 
     def stop(self):
@@ -215,21 +232,76 @@ class ScannerService:
             cycle = 0
             while not self._stop_event.is_set():
                 cycle += 1
-                self._emit_log(f"⟳ Starting scan cycle #{cycle}...")
+                self._emit_log(f"⟳ 开始扫描 (第 {cycle} 轮)...")
                 self._last_scan_at = datetime.now(timezone.utc)
 
-                try:
-                    # 执行扫描
-                    ready_episodes = self._scanner.scan_and_filter()
+                # 更新进度: 开始扫描
+                self._scan_progress = {
+                    "scanning": True,
+                    "phase": "listing",
+                    "current": 0,
+                    "total": 0,
+                    "message": "正在列出 BOS 目录...",
+                    "start_time": time.time(),
+                    "eta_seconds": None
+                }
 
-                    self._stats["found"] = len(self._scanner.scan_episodes())
+                try:
+                    # 执行扫描 - 列出所有 episodes
+                    self._scan_progress["message"] = "正在扫描 BOS 目录..."
+                    all_episodes = self._scanner.scan_episodes()
+                    self._stats["found"] = len(all_episodes)
+
+                    # 更新进度: 开始验证
+                    self._scan_progress = {
+                        "scanning": True,
+                        "phase": "validating",
+                        "current": 0,
+                        "total": self._stats["found"],
+                        "message": f"正在验证 episode (0/{self._stats['found']})...",
+                        "start_time": time.time(),
+                        "eta_seconds": None
+                    }
+
+                    # 过滤就绪的 episodes
+                    ready_episodes = self._scanner.scan_and_filter()
                     self._stats["ready"] = len(ready_episodes)
+
+                    if self._stats["found"] > 0:
+                        self._emit_log(f"🔍 发现 {self._stats['found']} 个 episode，{self._stats['ready']} 个已就绪")
+
+                    # 更新进度: 开始发布
+                    total_to_publish = len(ready_episodes)
+                    publish_start_time = time.time()
+                    self._scan_progress = {
+                        "scanning": True,
+                        "phase": "publishing",
+                        "current": 0,
+                        "total": total_to_publish,
+                        "message": f"正在发布任务 (0/{total_to_publish})...",
+                        "start_time": publish_start_time,
+                        "eta_seconds": None
+                    }
 
                     # 发布任务
                     published = 0
                     skipped = 0
-                    for ep_info in ready_episodes:
+                    for idx, ep_info in enumerate(ready_episodes):
                         episode_id = ep_info["episode_id"]
+
+                        # 计算预估剩余时间
+                        elapsed = time.time() - publish_start_time
+                        if idx > 0 and elapsed > 0:
+                            avg_time_per_item = elapsed / idx
+                            remaining_items = total_to_publish - idx
+                            eta_seconds = int(avg_time_per_item * remaining_items)
+                        else:
+                            eta_seconds = None
+
+                        # 更新进度
+                        self._scan_progress["current"] = idx + 1
+                        self._scan_progress["eta_seconds"] = eta_seconds
+                        self._scan_progress["message"] = f"正在发布 ({idx + 1}/{total_to_publish}): {episode_id}"
 
                         from lerobot_converter.core.task import ConversionTask, AlignmentStrategy
 
@@ -252,26 +324,46 @@ class ScannerService:
 
                         if self._task_queue.publish(task):
                             published += 1
-                            self._emit_log(f"✓ Published {episode_id}")
+                            self._emit_log(f"📤 发布任务: {episode_id}")
                         else:
                             skipped += 1
+                            self._emit_log(f"⚠ 跳过 (已存在): {episode_id}")
 
                     self._stats["published"] += published
                     self._stats["skipped"] += skipped
 
-                    self._emit_log(
-                        f"📊 Cycle #{cycle} done: "
-                        f"found={self._stats['found']}, ready={self._stats['ready']}, "
-                        f"published={published}, skipped={skipped}"
-                    )
+                    # 更新进度: 完成
+                    self._scan_progress = {
+                        "scanning": False,
+                        "phase": "done",
+                        "current": total_to_publish,
+                        "total": total_to_publish,
+                        "message": f"扫描完成: 发布 {published} 个，跳过 {skipped} 个",
+                        "start_time": None,
+                        "eta_seconds": None
+                    }
+
+                    if published > 0 or skipped > 0:
+                        self._emit_log(f"✓ 第 {cycle} 轮完成: 发布 {published} 个，跳过 {skipped} 个")
+                    else:
+                        self._emit_log(f"✓ 第 {cycle} 轮完成: 无新任务")
 
                 except Exception as e:
-                    self._emit_log(f"✗ Scan error: {e}")
+                    self._scan_progress = {
+                        "scanning": False,
+                        "phase": "error",
+                        "current": 0,
+                        "total": 0,
+                        "message": f"扫描出错: {str(e)[:50]}",
+                        "start_time": None,
+                        "eta_seconds": None
+                    }
+                    self._emit_log(f"✗ 扫描出错: {e}")
                     logger.exception("Scan error")
 
                 # 单次模式：完成后退出
                 if mode == "once":
-                    self._emit_log("✓ One-time scan completed")
+                    self._emit_log("✓ 全量扫描完成")
                     break
 
                 # 持续模式：等待下一次扫描
@@ -295,6 +387,15 @@ class ScannerService:
 
     def get_status(self) -> Dict[str, Any]:
         """获取扫描器状态"""
+        # 过滤 progress，只返回前端需要的字段
+        progress = {
+            "scanning": self._scan_progress.get("scanning", False),
+            "phase": self._scan_progress.get("phase", ""),
+            "current": self._scan_progress.get("current", 0),
+            "total": self._scan_progress.get("total", 0),
+            "message": self._scan_progress.get("message", ""),
+            "eta_seconds": self._scan_progress.get("eta_seconds")
+        }
         return {
             "running": self._running,
             "mode": self._mode,
@@ -302,7 +403,8 @@ class ScannerService:
             "started_at": self._started_at.isoformat() if self._started_at else None,
             "last_scan_at": self._last_scan_at.isoformat() if self._last_scan_at else None,
             "next_scan_at": self._next_scan_at.isoformat() if self._next_scan_at else None,
-            "stats": self._stats.copy()
+            "stats": self._stats.copy(),
+            "progress": progress
         }
 
 

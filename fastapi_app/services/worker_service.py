@@ -68,7 +68,7 @@ class WorkerService:
         """
         with self._lock:
             if self._running:
-                self._emit_log("⚠ Workers already running")
+                self._emit_log("⚠ Workers 已在运行中")
                 return False
 
             self._running = True
@@ -84,7 +84,12 @@ class WorkerService:
                 self._executor.submit(self._worker_loop, i)
                 self._active_workers += 1
 
-            self._emit_log(f"▶ Started {num_workers} workers")
+            # 获取配置信息用于日志
+            strategy = self._config.get("conversion", {}).get("strategy", "nearest")
+            if hasattr(strategy, 'value'):
+                strategy = strategy.value
+
+            self._emit_log(f"▶ 启动 {num_workers} 个 Worker (策略: {strategy})")
             return True
 
     def stop(self):
@@ -93,7 +98,7 @@ class WorkerService:
             if not self._running:
                 return False
 
-            self._emit_log("■ Stopping workers...")
+            self._emit_log("■ 正在停止 Workers...")
             self._stop_event.set()
             self._running = False
 
@@ -102,12 +107,12 @@ class WorkerService:
                 self._executor = None
 
             self._active_workers = 0
-            self._emit_log("■ Workers stopped")
+            self._emit_log("■ 所有 Workers 已停止")
             return True
 
     def _worker_loop(self, worker_id: int):
         """单个 Worker 的工作循环"""
-        self._emit_log(f"Worker-{worker_id} started")
+        self._emit_log(f"Worker-{worker_id} 启动中...")
 
         try:
             import tempfile
@@ -120,6 +125,11 @@ class WorkerService:
             strategy = self._config.get("conversion", {}).get("strategy", "nearest")
             if hasattr(strategy, 'value'):
                 strategy = strategy.value
+
+            # 获取 Worker 配置
+            worker_config = self._config.get("worker", {})
+            download_concurrent = int(worker_config.get("download_concurrent", 4))
+            upload_concurrent = int(worker_config.get("upload_concurrent", 4))
 
             # 构建 storage config 格式 (与 storage.yaml 结构一致)
             storage_config = {
@@ -136,12 +146,12 @@ class WorkerService:
                     "task_name": str(self._config.get("paths", {}).get("task_name", "")),
                     "download": {
                         "temp_dir": "/tmp/lerobot_bos",
-                        "concurrent": 4,
+                        "concurrent": download_concurrent,
                         "retry": 3,
                         "retry_delay": 5,
                     },
                     "upload": {
-                        "concurrent": 4,
+                        "concurrent": upload_concurrent,
                         "retry": 3,
                         "retry_delay": 5,
                         "cleanup_local": True,
@@ -191,7 +201,7 @@ class WorkerService:
                 bos_config_path=temp_config_file.name
             )
 
-            self._emit_log(f"Worker-{worker_id} initialized successfully")
+            self._emit_log(f"Worker-{worker_id} 初始化完成，策略: {strategy}")
 
             while not self._stop_event.is_set():
                 try:
@@ -200,13 +210,19 @@ class WorkerService:
 
                     if task_data:
                         episode_id = task_data.get("episode_id", "unknown")
-                        self._emit_log(f"Worker-{worker_id} processing {episode_id}")
+                        source = task_data.get("source", "unknown")
+                        self._emit_log(f"Worker-{worker_id} 🔄 开始转换: {episode_id}")
 
                         try:
                             worker.process_task(task_data, task_queue)
-                            self._emit_log(f"Worker-{worker_id} ✓ completed {episode_id}")
+                            self._emit_log(f"Worker-{worker_id} ✓ 转换完成: {episode_id}")
                         except Exception as e:
-                            self._emit_log(f"Worker-{worker_id} ✗ failed {episode_id}: {e}")
+                            error_msg = str(e)
+                            # 简化错误信息显示
+                            if len(error_msg) > 100:
+                                error_msg = error_msg[:100] + "..."
+                            self._emit_log(f"Worker-{worker_id} ✗ 转换失败: {episode_id}")
+                            self._emit_log(f"Worker-{worker_id}   原因: {error_msg}")
                             logger.exception(f"Worker-{worker_id} task error")
 
                 except Exception as e:
@@ -215,13 +231,16 @@ class WorkerService:
                         time.sleep(1)
 
         except Exception as e:
-            self._emit_log(f"Worker-{worker_id} initialization error: {e}")
+            error_msg = str(e)
+            if len(error_msg) > 100:
+                error_msg = error_msg[:100] + "..."
+            self._emit_log(f"Worker-{worker_id} ✗ 初始化失败: {error_msg}")
             logger.exception(f"Worker-{worker_id} error")
 
         finally:
             with self._lock:
                 self._active_workers = max(0, self._active_workers - 1)
-            self._emit_log(f"Worker-{worker_id} stopped")
+            self._emit_log(f"Worker-{worker_id} 已停止")
 
     def get_status(self) -> Dict[str, Any]:
         """获取 Worker 状态"""

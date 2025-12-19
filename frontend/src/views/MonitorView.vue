@@ -64,6 +64,16 @@ const formatTime = (isoString) => {
   return date.toLocaleString('zh-CN')
 }
 
+// 格式化时间戳（Unix timestamp）
+const formatTimestamp = (timestamp) => {
+  if (!timestamp) return '-'
+  // timestamp 可能是字符串或数字
+  const ts = typeof timestamp === 'string' ? parseInt(timestamp) : timestamp
+  if (isNaN(ts) || ts === 0) return '-'
+  const date = new Date(ts * 1000)
+  return date.toLocaleString('zh-CN')
+}
+
 // 状态标签类型
 const getStatusType = (status) => {
   const types = {
@@ -158,33 +168,32 @@ onUnmounted(() => {
         stripe
         style="width: 100%"
       >
-        <el-table-column prop="episode_id" label="Episode" min-width="150" />
-        <el-table-column prop="status" label="状态" width="100">
+        <el-table-column prop="episode_id" label="Episode" width="140" />
+        <el-table-column prop="status" label="状态" width="80">
           <template #default="{ row }">
             <el-tag :type="getStatusType(row.status)" size="small">
               {{ getStatusText(row.status) }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="strategy" label="策略" width="100" />
-        <el-table-column prop="frames" label="帧数" width="80">
+        <el-table-column prop="source_path" label="源路径" min-width="200">
           <template #default="{ row }">
-            {{ row.frames || '-' }}
+            <span class="path-text" :title="row.source_path">{{ row.source_path || '-' }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="created_at" label="创建时间" width="180">
+        <el-table-column prop="target_path" label="目标路径" min-width="200">
           <template #default="{ row }">
-            {{ formatTime(row.created_at) }}
+            <span class="path-text" :title="row.target_path">{{ row.target_path || '-' }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="completed_at" label="完成时间" width="180">
+        <el-table-column prop="timestamp" label="处理时间" width="160">
           <template #default="{ row }">
-            {{ formatTime(row.completed_at) }}
+            {{ formatTimestamp(row.timestamp) }}
           </template>
         </el-table-column>
-        <el-table-column prop="error" label="错误信息" min-width="200">
+        <el-table-column prop="error" label="错误信息" min-width="150">
           <template #default="{ row }">
-            <span v-if="row.error" class="error-text">{{ row.error }}</span>
+            <span v-if="row.error" class="error-text" :title="row.error">{{ row.error }}</span>
             <span v-else>-</span>
           </template>
         </el-table-column>
@@ -206,11 +215,58 @@ onUnmounted(() => {
 
 <style scoped>
 .monitor-view {
-  max-width: 1200px;
+  width: 100%;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .stats-card {
-  margin-bottom: 20px;
+  margin-bottom: 16px;
+  border-radius: 10px;
+  border: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  transition: all 0.3s ease;
+  flex-shrink: 0;
+}
+
+.episodes-card {
+  margin-bottom: 0;
+  border-radius: 10px;
+  border: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  transition: all 0.3s ease;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.stats-card:hover,
+.episodes-card:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+}
+
+.stats-card :deep(.el-card__header),
+.episodes-card :deep(.el-card__header) {
+  background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%);
+  border-bottom: 1px solid #f0f2f5;
+  padding: 12px 16px;
+}
+
+.stats-card :deep(.el-card__body) {
+  padding: 16px;
+}
+
+.episodes-card :deep(.el-card__body) {
+  padding: 16px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
 }
 
 .card-header {
@@ -222,65 +278,126 @@ onUnmounted(() => {
 .card-header span {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-weight: 500;
+  gap: 6px;
+  font-weight: 600;
+  font-size: 14px;
+  color: #303133;
+}
+
+.card-header span .el-icon {
+  color: #667eea;
 }
 
 .stat-box {
   text-align: center;
-  padding: 20px;
-  border-radius: 8px;
-  transition: transform 0.2s;
+  padding: 16px 12px;
+  border-radius: 10px;
+  transition: all 0.3s ease;
+  cursor: default;
 }
 
 .stat-box:hover {
-  transform: translateY(-2px);
+  transform: translateY(-3px);
 }
 
 .stat-box.pending {
-  background: linear-gradient(135deg, #909399 0%, #c0c4cc 100%);
+  background: linear-gradient(135deg, #a8b5c8 0%, #c8d0dc 100%);
   color: white;
+  box-shadow: 0 4px 10px rgba(144, 147, 153, 0.3);
 }
 
 .stat-box.processing {
-  background: linear-gradient(135deg, #e6a23c 0%, #f5c371 100%);
+  background: linear-gradient(135deg, #f0a020 0%, #f5c371 100%);
   color: white;
+  box-shadow: 0 4px 10px rgba(230, 162, 60, 0.3);
 }
 
 .stat-box.completed {
-  background: linear-gradient(135deg, #67c23a 0%, #95d475 100%);
+  background: linear-gradient(135deg, #52c41a 0%, #95d475 100%);
   color: white;
+  box-shadow: 0 4px 10px rgba(103, 194, 58, 0.3);
 }
 
 .stat-box.failed {
-  background: linear-gradient(135deg, #f56c6c 0%, #f89898 100%);
+  background: linear-gradient(135deg, #ff4d4f 0%, #ff7875 100%);
   color: white;
+  box-shadow: 0 4px 10px rgba(245, 108, 108, 0.3);
 }
 
 .stat-number {
-  font-size: 36px;
+  font-size: 32px;
   font-weight: 700;
   line-height: 1.2;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .stat-label {
-  font-size: 14px;
-  opacity: 0.9;
+  font-size: 12px;
+  opacity: 0.95;
   margin-top: 4px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
 }
 
-.episodes-card {
-  margin-bottom: 20px;
+.episodes-card :deep(.el-table) {
+  border-radius: 6px;
+  font-size: 13px;
+  flex: 1;
+  overflow: auto;
+}
+
+.episodes-card :deep(.el-table__inner-wrapper) {
+  height: 100% !important;
+}
+
+.episodes-card :deep(.el-scrollbar__wrap) {
+  max-height: 100% !important;
+}
+
+.episodes-card :deep(.el-table th) {
+  background: #f8f9fa !important;
+  font-weight: 600;
+  color: #606266;
+  padding: 8px 0;
+}
+
+.episodes-card :deep(.el-table td) {
+  padding: 6px 0;
 }
 
 .error-text {
   color: #f56c6c;
   font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: block;
+}
+
+.path-text {
+  font-size: 12px;
+  color: #606266;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: block;
+  font-family: monospace;
 }
 
 .pagination-wrapper {
-  margin-top: 16px;
+  margin-top: 12px;
   display: flex;
   justify-content: flex-end;
+  flex-shrink: 0;
+}
+
+/* 刷新按钮 */
+.card-header .el-button {
+  color: #667eea;
+}
+
+.card-header .el-button:hover {
+  background: rgba(102, 126, 234, 0.1);
+  border-radius: 6px;
 }
 </style>

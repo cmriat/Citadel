@@ -3,16 +3,11 @@ import { createRouter, createWebHistory } from 'vue-router'
 const routes = [
   {
     path: '/',
-    redirect: '/config'
+    redirect: '/control'
   },
   {
-    path: '/config',
-    name: 'Config',
-    component: () => import('../views/ConfigView.vue')
-  },
-  {
-    path: '/scanner',
-    name: 'Scanner',
+    path: '/control',
+    name: 'Control',
     component: () => import('../views/ScannerView.vue')
   },
   {

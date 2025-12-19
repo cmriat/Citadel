@@ -43,7 +43,14 @@ class ConversionConfig(BaseModel):
     strategy: AlignmentStrategy = AlignmentStrategy.NEAREST
     tolerance_ms: int = 20
     chunk_size: int = 10
-    fps: int = 30
+    fps: int = 25
+
+
+class WorkerConfig(BaseModel):
+    """Worker 配置"""
+    num_workers: int = 4
+    download_concurrent: int = 4
+    upload_concurrent: int = 4
 
 
 class ScannerConfig(BaseModel):
@@ -68,6 +75,7 @@ class AppConfig(BaseModel):
     conversion: ConversionConfig = Field(default_factory=ConversionConfig)
     scanner: ScannerConfig = Field(default_factory=ScannerConfig)
     redis: RedisConfig = Field(default_factory=RedisConfig)
+    worker: WorkerConfig = Field(default_factory=WorkerConfig)
 
 
 # ============================================================
@@ -78,6 +86,16 @@ class ScannerStartRequest(BaseModel):
     """启动扫描器请求"""
     mode: ScanMode = ScanMode.CONTINUOUS
     interval: int = 120
+
+
+class ScanProgress(BaseModel):
+    """扫描进度"""
+    scanning: bool = False
+    phase: str = ""  # "listing", "validating", "publishing", "done", "error"
+    current: int = 0
+    total: int = 0
+    message: str = ""
+    eta_seconds: Optional[int] = None  # 预估剩余时间（秒）
 
 
 class ScannerStatus(BaseModel):
@@ -94,6 +112,7 @@ class ScannerStatus(BaseModel):
         "published": 0,
         "skipped": 0
     })
+    progress: ScanProgress = Field(default_factory=ScanProgress)
 
 
 # ============================================================
@@ -130,6 +149,9 @@ class EpisodeInfo(BaseModel):
     episode_id: str
     status: str  # "completed", "failed", "processing"
     timestamp: str
+    source: Optional[str] = None
+    source_path: Optional[str] = None
+    target_path: Optional[str] = None
     strategy: Optional[str] = None
     frames: Optional[int] = None
     error: Optional[str] = None

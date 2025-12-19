@@ -27,5 +27,6 @@ export const getWorkerStatus = () => api.get('/worker/status')
 export const getQueueStats = () => api.get('/stats')
 export const getEpisodes = (limit = 20, offset = 0) =>
   api.get('/episodes', { params: { limit, offset } })
+export const getSystemStats = () => api.get('/system')
 
 export default api
