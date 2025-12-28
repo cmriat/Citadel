@@ -1,0 +1,64 @@
+[workspace]
+name = "citadel_release"
+version = "0.1.0"
+description = "BOS下载和HDF5转换管理系统 - 支持Web界面和CLI工具"
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[dependencies]
+python = ">=3.10"
+# 后端Web框架
+fastapi = ">=0.125.0"
+uvicorn = ">=0.38.0"
+python-multipart = ">=0.0.21"
+# 数据处理核心依赖
+h5py = ">=3.15.1,<4"
+numpy = ">=1.24.0"
+pyarrow = ">=22.0.0,<23"
+pandas = ">=2.3.3,<3"
+av = "*"
+pillow = "*"
+# 命令行工具
+tyro = "*"
+termcolor = "*"
+# 系统工具
+psutil = ">=5.9.0"
+pydantic = ">=2.0.0"
+# WebSocket支持
+websockets = "*"
+
+[tasks]
+# =============================================================================
+# Web服务器启动任务
+# =============================================================================
+
+# 启动开发服务器（热重载）
+dev = "uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000"
+
+# 启动生产服务器
+start = "uvicorn backend.main:app --host 0.0.0.0 --port 8000"
+
+# =============================================================================
+# CLI工具任务（独立运行，不需要Web服务器）
+# =============================================================================
+
+# 下载工具 - 从BOS下载HDF5文件
+# 示例: pixi run download --bos-path "srgdata/..." --local-path "/home/maozan/data/..."
+download = "python -m cli.download_cli"
+
+# 转换工具 - 批量转换HDF5为LeRobot v2.1格式
+# 示例: pixi run convert --input-dir "/path/to/hdf5/" --output-dir "/path/to/output/"
+convert = "python -m cli.convert_cli"
+
+# =============================================================================
+# 测试和开发工具
+# =============================================================================
+
+# 运行所有测试
+test = "pytest tests/ -v"
+
+# 前端构建
+build-frontend = "cd frontend && npm install && npm run build"
+
+# 查看帮助信息
+help = "echo '\n📦 Citadel Release - 使用指南\n\n🌐 Web模式:\n  pixi run dev    - 启动开发服务器\n  pixi run start  - 启动生产服务器\n\n⌨️  CLI模式:\n  pixi run download  - BOS下载工具 (使用 --help 查看参数)\n  pixi run convert   - HDF5转换工具 (使用 --help 查看参数)\n\n🧪 开发工具:\n  pixi run test              - 运行测试\n  pixi run build-frontend    - 构建前端\n'"

@@ -1,0 +1,81 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+.pixi/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Test Data & Output
+test_data/download_test/
+test_data/lerobot_output/
+test_data/lerobot_batch_test/
+test_data/convert_test/
+test_data/debug_test/
+data/
+output/
+
+# Temporary Files
+*.tmp
+*.log
+*.cache
+
+# Large Files
+*.h5
+*.hdf5
+*.mp4
+*.parquet
+
+# Runtime Data
+backend/data/tasks/
+backend/data/logs/
+
+# Node.js (for frontend)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Frontend Build
+frontend/dist/
+frontend/.nuxt/
+frontend/.output/
+frontend/.cache/
+
+# System Files
+.DS_Store
+Thumbs.db
