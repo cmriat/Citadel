@@ -3,8 +3,9 @@
 ## 项目信息
 
 - **开始日期**: 2025-12-26
-- **当前版本**: v0.1.0-alpha
+- **当前版本**: v0.2.0-dev
 - **项目状态**: 🚧 开发中
+- **当前分支**: feature/backend-api
 
 ---
 
@@ -46,30 +47,33 @@
 
 ---
 
-## 阶段2: 后端核心服务 ⏳
+## 阶段2: 后端核心服务 ✅
 
-**状态**: 未开始
-**预计时间**: 2天
+**状态**: 已完成
+**开始日期**: 2025-12-28
+**完成日期**: 2025-12-28
+**实际耗时**: <0.5天
 
-### 2.1 下载服务 ⏳
-- [ ] 实现 `backend/services/download_service.py`
-- [ ] 封装mc命令执行
-- [ ] 实时进度解析
+### 2.1 数据模型和存储 ✅
+- [x] 实现 `backend/models/task.py` - 任务数据模型
+- [x] 实现 `backend/services/database.py` - SQLite数据库服务
+- [x] 任务状态机：pending → running → completed/failed
 
-### 2.2 转换服务 ⏳
-- [ ] 实现 `backend/services/convert_service.py`
-- [ ] 封装convert.py调用
-- [ ] 批量转换逻辑
+### 2.2 下载服务 ✅
+- [x] 实现 `backend/services/download_service.py`
+- [x] 复用 `cli/utils/mc_executor.py`
+- [x] 异步任务执行和进度上报
 
-### 2.3 任务管理 ⏳
-- [ ] 实现 `backend/services/task_manager.py`
-- [ ] 任务CRUD操作
-- [ ] JSON文件持久化
+### 2.3 转换服务 ✅
+- [x] 实现 `backend/services/convert_service.py`
+- [x] 复用 `scripts/convert.py` 逻辑
+- [x] 批量任务队列和并发控制
 
-### 2.4 API路由 ⏳
-- [ ] 实现下载API (`backend/routers/download.py`)
-- [ ] 实现转换API (`backend/routers/convert.py`)
-- [ ] 实现 `backend/main.py` 入口
+### 2.4 API路由 ✅
+- [x] 实现 `backend/main.py` - FastAPI入口
+- [x] 实现 `backend/routers/tasks.py` - 任务管理API
+- [x] 实现 `backend/routers/download.py` - 下载API
+- [x] 实现 `backend/routers/convert.py` - 转换API
 
 ---
 
@@ -253,10 +257,15 @@
 - ✅ **2025-12-28**: 🎉 v0.1.0发布！
   - 完善README.md和USER_GUIDE.md
   - CLI工具版本正式发布
-- ⏳ **目标**: 后端API可用（阶段2+3完成）
+- ✅ **2025-12-28**: 后端API服务完成（阶段2完成）🎉
+  - 数据模型和SQLite存储
+  - 下载/转换服务（异步执行、进度跟踪）
+  - RESTful API（任务管理、下载、转换）
+  - 分支：feature/backend-api
+- ⏳ **目标**: 日志和监控（阶段3）
 - ⏳ **目标**: Web界面可用（阶段4完成）
 
 ---
 
 **更新频率**: 每完成一个子任务更新一次
-**最后更新**: 2025-12-28 (v0.1.0发布，阶段6完成)
+**最后更新**: 2025-12-28 (阶段2完成，后端API服务)

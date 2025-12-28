@@ -40,11 +40,7 @@ venv.bak/
 .DS_Store
 
 # Test Data & Output
-test_data/download_test/
-test_data/lerobot_output/
-test_data/lerobot_batch_test/
-test_data/convert_test/
-test_data/debug_test/
+test_data/
 data/
 output/
 

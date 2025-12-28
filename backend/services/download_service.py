@@ -1,0 +1,270 @@
+"""
+下载服务
+
+封装mc命令执行，提供异步下载功能和进度回调。
+复用 cli/utils/mc_executor.py 的核心逻辑。
+"""
+
+import asyncio
+import subprocess
+import re
+import time
+from pathlib import Path
+from typing import Optional, Callable, Tuple
+from datetime import datetime
+import threading
+
+from backend.models.task import (
+    Task, TaskType, TaskStatus, TaskResult,
+    CreateDownloadTaskRequest
+)
+from backend.services.database import get_database
+
+
+class DownloadService:
+    """下载服务"""
+
+    def __init__(self, mc_path: str = "/home/maozan/mc"):
+        self.mc_path = Path(mc_path)
+        self._running_tasks: dict[str, threading.Thread] = {}
+        self._cancel_flags: dict[str, bool] = {}
+
+    def check_mc(self) -> Tuple[bool, str]:
+        """检查mc工具是否可用"""
+        if not self.mc_path.exists():
+            return False, f"mc命令未找到: {self.mc_path}"
+
+        try:
+            result = subprocess.run(
+                [str(self.mc_path), "--version"],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            if result.returncode == 0:
+                return True, result.stdout.strip()
+            return False, result.stderr
+        except Exception as e:
+            return False, str(e)
+
+    def check_connection(self) -> Tuple[bool, str]:
+        """检查BOS连接"""
+        try:
+            result = subprocess.run(
+                [str(self.mc_path), "ls", "bos/"],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            if result.returncode == 0:
+                return True, ""
+            return False, f"连接失败: {result.stderr}"
+        except subprocess.TimeoutExpired:
+            return False, "连接超时"
+        except Exception as e:
+            return False, f"连接异常: {str(e)}"
+
+    def create_task(self, request: CreateDownloadTaskRequest) -> Task:
+        """创建下载任务"""
+        task = Task(
+            type=TaskType.DOWNLOAD,
+            config=request.model_dump()
+        )
+
+        # 保存到数据库
+        db = get_database()
+        db.create(task)
+
+        return task
+
+    def start_task(self, task_id: str) -> bool:
+        """启动下载任务（异步执行）"""
+        db = get_database()
+        task = db.get(task_id)
+
+        if not task:
+            return False
+
+        if task.status != TaskStatus.PENDING:
+            return False
+
+        # 标记任务开始
+        task.start()
+        db.update(task)
+
+        # 启动后台线程执行下载
+        self._cancel_flags[task_id] = False
+        thread = threading.Thread(
+            target=self._execute_download,
+            args=(task_id,),
+            daemon=True
+        )
+        self._running_tasks[task_id] = thread
+        thread.start()
+
+        return True
+
+    def cancel_task(self, task_id: str) -> bool:
+        """取消下载任务"""
+        db = get_database()
+        task = db.get(task_id)
+
+        if not task:
+            return False
+
+        if task.status != TaskStatus.RUNNING:
+            return False
+
+        # 设置取消标志
+        self._cancel_flags[task_id] = True
+
+        # 更新任务状态
+        task.cancel()
+        db.update(task)
+
+        return True
+
+    def get_task(self, task_id: str) -> Optional[Task]:
+        """获取任务信息"""
+        db = get_database()
+        return db.get(task_id)
+
+    def _execute_download(self, task_id: str) -> None:
+        """执行下载（在后台线程中运行）"""
+        db = get_database()
+        task = db.get(task_id)
+
+        if not task:
+            return
+
+        config = task.config
+        start_time = time.time()
+        downloaded_files: list[str] = []
+
+        try:
+            # 创建本地目录
+            local_path = Path(config['local_path'])
+            local_path.mkdir(parents=True, exist_ok=True)
+
+            # 构建mc命令
+            mc_path = config.get('mc_path', str(self.mc_path))
+            source = f"bos/{config['bos_path']}"
+            concurrency = config.get('concurrency', 10)
+
+            cmd = [
+                mc_path,
+                "mirror",
+                f"--max-workers={concurrency}",
+                source,
+                str(local_path)
+            ]
+
+            # 启动进程
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1
+            )
+
+            # 读取输出并更新进度
+            for line in iter(process.stdout.readline, ''):
+                # 检查取消标志
+                if self._cancel_flags.get(task_id, False):
+                    process.terminate()
+                    break
+
+                line = line.strip()
+                if not line:
+                    continue
+
+                # 解析文件完成信息
+                filename = self._parse_mc_output(line)
+                if filename:
+                    downloaded_files.append(filename)
+
+                    # 更新进度
+                    task.update_progress(
+                        current_file=filename,
+                        completed_files=len(downloaded_files),
+                        message=f"已下载: {filename}"
+                    )
+                    db.update(task)
+
+            # 等待进程结束
+            return_code = process.wait()
+            elapsed = time.time() - start_time
+
+            # 计算总大小
+            total_size_mb = self._calculate_total_size(local_path, downloaded_files)
+
+            # 更新结果
+            if self._cancel_flags.get(task_id, False):
+                task.cancel()
+            elif return_code == 0:
+                task.complete(TaskResult(
+                    success=True,
+                    total_files=len(downloaded_files),
+                    completed_files=len(downloaded_files),
+                    elapsed_seconds=elapsed,
+                    details={
+                        'total_size_mb': total_size_mb,
+                        'speed_mbps': total_size_mb / elapsed if elapsed > 0 else 0,
+                        'files': downloaded_files
+                    }
+                ))
+            else:
+                task.complete(TaskResult(
+                    success=False,
+                    total_files=len(downloaded_files),
+                    completed_files=len(downloaded_files),
+                    elapsed_seconds=elapsed,
+                    error_message=f"mc命令返回错误码: {return_code}"
+                ))
+
+            db.update(task)
+
+        except Exception as e:
+            elapsed = time.time() - start_time
+            task.complete(TaskResult(
+                success=False,
+                elapsed_seconds=elapsed,
+                error_message=f"下载异常: {str(e)}"
+            ))
+            db.update(task)
+
+        finally:
+            # 清理
+            self._running_tasks.pop(task_id, None)
+            self._cancel_flags.pop(task_id, None)
+
+    def _parse_mc_output(self, line: str) -> Optional[str]:
+        """解析mc输出，提取文件名"""
+        # mc mirror格式: `source` -> `dest`
+        pattern = r'`[^`]+/([\w\-\.]+\.h5)`\s*->\s*`([^`]+)`'
+        match = re.search(pattern, line)
+        if match:
+            return match.group(1)
+        return None
+
+    def _calculate_total_size(self, local_path: Path, files: list[str]) -> float:
+        """计算下载文件总大小（MB）"""
+        total = 0.0
+        for filename in files:
+            file_path = local_path / filename
+            if file_path.exists():
+                total += file_path.stat().st_size / (1024 * 1024)
+        return total
+
+
+# 全局服务实例
+_download_service: Optional[DownloadService] = None
+
+
+def get_download_service() -> DownloadService:
+    """获取下载服务单例"""
+    global _download_service
+    if _download_service is None:
+        _download_service = DownloadService()
+    return _download_service
