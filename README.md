@@ -1,172 +1,218 @@
 # Citadel Release
 
-🚀 BOS下载和HDF5转换管理系统 - 支持Web界面和CLI工具
+BOS下载和HDF5转换CLI工具 - 用于机器人数据管理
 
 ## 项目简介
 
-Citadel Release 是一个完整的数据管理系统，用于从百度对象存储(BOS)下载机器人数据（HDF5格式），并批量转换为LeRobot v2.1标准格式。
+Citadel Release 是一套命令行工具，用于从百度对象存储(BOS)下载机器人数据（HDF5格式），并批量转换为LeRobot v2.1标准格式。
 
 ### 核心功能
 
-- ✅ **BOS数据下载**: 使用mc (MinIO Client)高效下载，支持断点续传
-- ✅ **HDF5格式转换**: 批量转换为LeRobot v2.1格式（包含meta、data、videos）
-- ✅ **Web管理界面**: 可视化任务管理、实时进度监控、日志查看
-- ✅ **命令行工具**: 独立CLI工具，无需启动Web服务器，适合自动化脚本
+- **BOS数据下载**: 使用mc (MinIO Client)高效下载，支持并发控制和进度显示
+- **HDF5格式转换**: 批量转换为LeRobot v2.1格式（包含meta、data、videos）
+- **并发处理**: 支持多文件并发转换，提高处理效率
+- **进度监控**: 实时显示下载和转换进度
 
 ## 快速开始
 
 ### 前置要求
 
 1. **Linux环境** (测试于 Ubuntu 20.04+)
-2. **mc (MinIO Client)** - 已安装于 `/home/maozan/mc`
+2. **mc (MinIO Client)** - 需要预先配置BOS别名
 3. **pixi** - Python环境管理工具
 
 ### 安装
 
 ```bash
-# 进入项目目录
-cd /data/maozan/code/Citadel_release
+# 克隆项目
+git clone <repository-url>
+cd Citadel_release
 
 # 安装依赖
 pixi install
 
-# 查看帮助
-pixi run help
-```
-
-## 使用方式
-
-系统支持三种使用模式：
-
-### 模式1: 命令行工具 (CLI)
-
-**推荐用于：自动化脚本、快速操作**
-
-```bash
-# 下载HDF5文件
-pixi run download \
-  --bos-path "srgdata/robot/raw_data/.../fold_laundry/" \
-  --local-path "/home/maozan/data/fold_laundry/raw_hdf5/" \
-  --concurrency 10
-
-# 批量转换HDF5文件
-pixi run convert \
-  --input-dir "/home/maozan/data/fold_laundry/raw_hdf5/" \
-  --output-dir "/home/maozan/data/fold_laundry/lerobot_v21/" \
-  --robot-type "limx Tron2" \
-  --fps 30 \
-  --parallel-jobs 4
-
-# 查看命令行帮助
+# 验证安装
 pixi run download --help
 pixi run convert --help
 ```
 
-### 模式2: Web界面
+## 使用方式
 
-**推荐用于：可视化监控、任务管理**
+### 1. 下载HDF5文件
 
-```bash
-# 启动开发服务器
-pixi run dev
-
-# 或启动生产服务器
-pixi run start
-```
-
-然后访问 http://localhost:8000
-
-**功能包括：**
-- 📥 下载任务管理 - 配置BOS路径，启动/取消下载
-- 🔄 转换任务管理 - 选择HDF5文件，批量转换
-- 📊 实时监控 - 查看任务进度、系统状态
-- 📁 数据浏览 - 浏览下载和转换后的数据
-
-### 模式3: API调用
-
-**推荐用于：系统集成**
+从BOS下载机器人数据：
 
 ```bash
-# 启动API服务器
-pixi run start
-
-# 调用下载API
-curl -X POST http://localhost:8000/api/download/start \
-  -H "Content-Type: application/json" \
-  -d '{"bos_path": "...", "local_path": "...", "concurrency": 10}'
-
-# 查看任务状态
-curl http://localhost:8000/api/download/{task_id}/status
+pixi run download \
+  --bos-path "srgdata/robot/raw_data/upload_test/online_test_hdf5_v1/fold_laundry/" \
+  --local-path "/home/user/data/fold_laundry/raw_hdf5/" \
+  --concurrency 10
 ```
+
+**参数说明：**
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `--bos-path` | BOS远程路径（不含bos:前缀） | `srgdata/robot/raw_data/...` |
+| `--local-path` | 本地保存路径 | `test_data/download_test/` |
+| `--concurrency` | 并发下载数 | `10` |
+| `--mc-path` | mc可执行文件路径 | `/home/maozan/mc` |
+
+### 2. 批量转换HDF5文件
+
+将下载的HDF5文件转换为LeRobot v2.1格式：
+
+```bash
+pixi run convert \
+  --input-dir "/home/user/data/fold_laundry/raw_hdf5/" \
+  --output-dir "/home/user/data/fold_laundry/lerobot_v21/" \
+  --robot-type "airbot_play" \
+  --fps 25 \
+  --task "Fold the laundry" \
+  --parallel-jobs 4
+```
+
+**参数说明：**
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `--input-dir` | 输入HDF5目录 | `test_data/download_test/` |
+| `--output-dir` | 输出LeRobot目录 | `test_data/convert_test/` |
+| `--robot-type` | 机器人类型 | `airbot_play` |
+| `--fps` | 视频帧率 | `25` |
+| `--task` | 任务描述 | `Fold the laundry` |
+| `--parallel-jobs` | 并发转换数 | `4` |
+| `--file-pattern` | 文件匹配模式 | `episode_*.h5` |
 
 ## 项目结构
 
 ```
 Citadel_release/
-├── backend/          # FastAPI后端服务
-├── frontend/         # Vue3前端界面
-├── cli/              # 命令行工具（独立使用）
-├── scripts/          # 核心脚本（mc下载、HDF5转换）
-├── data/             # 运行时数据（任务状态、日志）
-├── pixi.toml         # 依赖配置
-├── README.md         # 本文件
-└── PROGRESS.md       # 开发进度
+├── cli/                  # 命令行工具
+│   ├── download_cli.py   # 下载CLI
+│   ├── convert_cli.py    # 转换CLI
+│   └── utils/            # 工具模块
+│       ├── mc_executor.py    # mc命令封装
+│       └── progress.py       # 进度跟踪
+├── scripts/              # 核心脚本
+│   ├── download.sh       # 下载脚本
+│   └── convert.py        # 转换脚本
+├── backend/              # 后端服务（计划中）
+├── pixi.toml             # 依赖配置
+├── README.md             # 本文件
+├── USER_GUIDE.md         # 用户指南
+└── PROGRESS.md           # 开发进度
+```
+
+## 数据格式
+
+### 输入格式（HDF5）
+
+支持的HDF5文件结构：
+
+```
+episode_XXXX.h5
+├── images/
+│   ├── cam_env/frames_jpeg      # 环境相机（JPEG压缩）
+│   ├── cam_left/frames_jpeg     # 左手相机（JPEG压缩）
+│   └── cam_right/frames_jpeg    # 右手相机（JPEG压缩）
+├── joints/
+│   ├── left_master/             # 左臂主控关节
+│   │   ├── joint1_pos ~ joint6_pos
+│   │   ├── eef_gripper_joint_pos
+│   │   ├── timestamp_sec
+│   │   └── timestamp_nanosec
+│   ├── right_master/            # 右臂主控关节
+│   ├── left_slave/              # 左臂从控关节
+│   └── right_slave/             # 右臂从控关节
+└── metadata
+```
+
+**特点：**
+- 双臂机器人：左右各6关节 + 1夹爪
+- State/Action维度：14（6+1+6+1）
+- 图像：JPEG压缩存储，~26fps
+- 关节数据：250Hz采样
+
+### 输出格式（LeRobot v2.1）
+
+转换后的标准LeRobot v2.1格式：
+
+```
+episode_XXXX/
+├── meta/
+│   ├── info.json           # 数据集信息
+│   └── tasks.json          # 任务描述
+├── data/
+│   └── chunk-000/
+│       └── episode_000000.parquet  # 状态/动作数据
+└── videos/
+    └── chunk-000/
+        └── episode_000000/
+            ├── cam_env.mp4
+            ├── cam_left.mp4
+            └── cam_right.mp4
 ```
 
 ## 数据流程
 
 ```
-BOS存储
+BOS存储 (百度对象存储)
   ↓ (mc mirror下载)
-本地HDF5目录 (/home/maozan/data/fold_laundry/raw_hdf5/)
+本地HDF5目录
   ↓ (convert.py转换)
-LeRobot v2.1格式 (/home/maozan/data/fold_laundry/lerobot_v21/)
-  ├── meta/               # 元数据文件
-  ├── data/chunk-000/     # Parquet数据文件
-  └── videos/chunk-000/   # MP4视频文件
+LeRobot v2.1格式
+  ├── meta/               # 元数据
+  ├── data/chunk-000/     # Parquet数据
+  └── videos/chunk-000/   # MP4视频
 ```
+
+## 测试结果
+
+在测试环境下的性能表现：
+
+| 操作 | 文件数 | 数据量 | 耗时 | 速度 |
+|------|--------|--------|------|------|
+| 下载 | 18个 | 246MB | 16秒 | 15.22 MB/s |
+| 转换 | 18个 | - | 17秒 | 1.0秒/文件 |
 
 ## 配置说明
 
-### 数据路径配置
-
-默认数据路径：
-- **BOS源**: `bos/srgdata/robot/raw_data/upload_test/online_test_hdf5/fold_laundry/`
-- **本地HDF5**: `/home/maozan/data/fold_laundry/raw_hdf5/`
-- **LeRobot输出**: `/home/maozan/data/fold_laundry/lerobot_v21/`
-
-可通过命令行参数或Web界面修改。
-
 ### mc工具配置
 
-默认mc路径: `/home/maozan/mc`
-
-如需修改，使用 `--mc-path` 参数。
-
-## 开发
-
-### 运行测试
+确保mc已配置BOS别名：
 
 ```bash
-pixi run test
-```
+# 检查mc版本
+/home/maozan/mc --version
 
-### 构建前端
+# 配置BOS别名（如尚未配置）
+mc alias set bos <endpoint> <access-key> <secret-key>
 
-```bash
-pixi run build-frontend
+# 验证连接
+mc ls bos/
 ```
 
 ## 常见问题
 
 ### Q: mc命令未找到？
-A: 确认mc已安装并路径正确。默认路径为 `/home/maozan/mc`。
+A: 确认mc已安装并路径正确。使用 `--mc-path` 参数指定路径。
 
 ### Q: pixi install失败？
 A: 检查网络连接，确保conda-forge镜像可访问。
 
 ### Q: 转换失败？
-A: 检查HDF5文件格式是否正确，确保包含必需的数据集（observations/images_color等）。
+A: 常见原因：
+1. HDF5文件格式不匹配 - 确保文件包含正确的数据结构
+2. 时间戳数据异常 - 检查joints数据中的timestamp_sec/timestamp_nanosec
+3. 图像解码失败 - 检查frames_jpeg是否为有效JPEG数据
+
+### Q: 如何查看详细日志？
+A: 转换脚本会在控制台输出详细进度，包括每帧的时间对齐信息。
+
+## 开发路线
+
+- [x] **v0.1.0** - CLI工具版本（当前）
+- [ ] **v0.2.0** - 后端API服务
+- [ ] **v0.3.0** - Web管理界面
 
 ## 许可证
 
@@ -175,9 +221,9 @@ MIT License
 ## 开发进度
 
 查看 [PROGRESS.md](./PROGRESS.md) 了解当前开发状态。
+查看 [USER_GUIDE.md](./USER_GUIDE.md) 了解详细使用指南。
 
 ---
 
-**开发者**: Citadel Team
 **版本**: v0.1.0
-**最后更新**: 2025-12-26
+**最后更新**: 2025-12-28
