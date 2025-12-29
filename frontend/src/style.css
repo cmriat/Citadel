@@ -1,0 +1,135 @@
+@import "tailwindcss";
+
+:root {
+  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Dark theme variables */
+html.dark {
+  color-scheme: dark;
+  --bg-primary: #0f0f0f;
+  --bg-secondary: #16162a;
+  --bg-tertiary: #1a1a2e;
+  --bg-hover: #252545;
+  --border-color: #2a2a4e;
+  --text-primary: #ffffff;
+  --text-secondary: rgba(255, 255, 255, 0.87);
+  --text-muted: #a0a0c0;
+  --text-dim: #6a6a8a;
+  --accent-color: #409eff;
+  --scrollbar-track: #1a1a2e;
+  --scrollbar-thumb: #4a4a6a;
+  --scrollbar-thumb-hover: #6a6a8a;
+}
+
+/* Light theme variables */
+html.light {
+  color-scheme: light;
+  --bg-primary: #f5f7fa;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #ffffff;
+  --bg-hover: #f0f2f5;
+  --border-color: #e4e7ed;
+  --text-primary: #303133;
+  --text-secondary: #606266;
+  --text-muted: #909399;
+  --text-dim: #c0c4cc;
+  --accent-color: #409eff;
+  --scrollbar-track: #f0f2f5;
+  --scrollbar-thumb: #c0c4cc;
+  --scrollbar-thumb-hover: #909399;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  min-height: 100vh;
+  background-color: var(--bg-primary);
+  color: var(--text-secondary);
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+#app {
+  width: 100%;
+  min-height: 100vh;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+
+/* Element Plus dark theme overrides */
+html.dark .el-button--primary {
+  --el-button-bg-color: #409eff;
+  --el-button-border-color: #409eff;
+}
+
+html.dark .el-card {
+  --el-card-bg-color: #1a1a2e;
+  --el-card-border-color: #2a2a4e;
+}
+
+html.dark .el-table {
+  --el-table-bg-color: #1a1a2e;
+  --el-table-header-bg-color: #16162a;
+  --el-table-row-hover-bg-color: #252545;
+  --el-table-border-color: #2a2a4e;
+  --el-table-text-color: #fff;
+}
+
+html.dark .el-input__wrapper {
+  background-color: #1a1a2e;
+  box-shadow: 0 0 0 1px #2a2a4e inset;
+}
+
+html.dark .el-input__inner {
+  color: #fff;
+}
+
+html.dark .el-form-item__label {
+  color: #a0a0c0;
+}
+
+html.dark .el-slider__runway {
+  background-color: #2a2a4e;
+}
+
+html.dark .el-button {
+  --el-button-bg-color: #252545;
+  --el-button-border-color: #2a2a4e;
+  --el-button-text-color: #fff;
+  --el-button-hover-bg-color: #353565;
+  --el-button-hover-border-color: #3a3a5e;
+}
+
+/* Element Plus light theme - use defaults mostly */
+html.light .el-table {
+  --el-table-bg-color: #ffffff;
+  --el-table-header-bg-color: #fafafa;
+  --el-table-row-hover-bg-color: #f5f7fa;
+}

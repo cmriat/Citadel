@@ -1,17 +1,19 @@
 # Citadel Release
 
-BOS下载和HDF5转换CLI工具 - 用于机器人数据管理
+BOS数据管理系统 - 用于机器人数据下载、转换和上传
 
 ## 项目简介
 
-Citadel Release 是一套命令行工具，用于从百度对象存储(BOS)下载机器人数据（HDF5格式），并批量转换为LeRobot v2.1标准格式。
+Citadel Release 是一套完整的机器人数据管理工具，包含命令行工具(CLI)和Web管理界面，用于从百度对象存储(BOS)下载机器人数据（HDF5格式），批量转换为LeRobot v2.1标准格式，并上传回BOS。
 
 ### 核心功能
 
 - **BOS数据下载**: 使用mc (MinIO Client)高效下载，支持并发控制和进度显示
 - **HDF5格式转换**: 批量转换为LeRobot v2.1格式（包含meta、data、videos）
+- **LeRobot数据上传**: 将转换后的数据上传回BOS存储
+- **Web管理界面**: 现代化Vue 3界面，支持任务管理、进度监控
 - **并发处理**: 支持多文件并发转换，提高处理效率
-- **进度监控**: 实时显示下载和转换进度
+- **进度监控**: 实时显示下载、转换和上传进度
 
 ## 快速开始
 
@@ -38,7 +40,32 @@ pixi run convert --help
 
 ## 使用方式
 
-### 1. 下载HDF5文件
+### 方式一：Web管理界面（推荐）
+
+启动后端和前端服务：
+
+```bash
+# 终端1：启动后端API服务
+pixi run uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
+
+# 终端2：启动前端开发服务器
+cd frontend && npm run dev
+```
+
+访问 **http://localhost:5173** 即可使用Web界面。
+
+**功能页面：**
+| 页面 | 功能 |
+|------|------|
+| 任务看板 | 查看所有任务状态、进度、统计 |
+| 下载管理 | 配置BOS路径，启动下载任务 |
+| 转换管理 | 扫描HDF5文件，批量转换 |
+| 上传管理 | 扫描LeRobot目录，上传到BOS |
+| 系统状态 | 查看系统健康状态和任务统计 |
+
+### 方式二：命令行工具（CLI）
+
+#### 1. 下载HDF5文件
 
 从BOS下载机器人数据：
 
@@ -57,7 +84,7 @@ pixi run download \
 | `--concurrency` | 并发下载数 | `10` |
 | `--mc-path` | mc可执行文件路径 | `/home/maozan/mc` |
 
-### 2. 批量转换HDF5文件
+#### 2. 批量转换HDF5文件
 
 将下载的HDF5文件转换为LeRobot v2.1格式：
 
@@ -86,20 +113,42 @@ pixi run convert \
 
 ```
 Citadel_release/
-├── cli/                  # 命令行工具
-│   ├── download_cli.py   # 下载CLI
-│   ├── convert_cli.py    # 转换CLI
-│   └── utils/            # 工具模块
+├── cli/                      # 命令行工具
+│   ├── download_cli.py       # 下载CLI
+│   ├── convert_cli.py        # 转换CLI
+│   └── utils/                # 工具模块
 │       ├── mc_executor.py    # mc命令封装
 │       └── progress.py       # 进度跟踪
-├── scripts/              # 核心脚本
-│   ├── download.sh       # 下载脚本
-│   └── convert.py        # 转换脚本
-├── backend/              # 后端服务（计划中）
-├── pixi.toml             # 依赖配置
-├── README.md             # 本文件
-├── USER_GUIDE.md         # 用户指南
-└── PROGRESS.md           # 开发进度
+├── scripts/                  # 核心脚本
+│   ├── download.sh           # 下载脚本
+│   └── convert.py            # 转换脚本
+├── backend/                  # 后端API服务
+│   ├── main.py               # FastAPI入口
+│   ├── models/               # 数据模型
+│   │   └── task.py           # 任务模型
+│   ├── routers/              # API路由
+│   │   ├── tasks.py          # 任务管理API
+│   │   ├── download.py       # 下载API
+│   │   ├── convert.py        # 转换API
+│   │   └── upload.py         # 上传API
+│   └── services/             # 业务服务
+│       ├── database.py       # SQLite数据库
+│       ├── download_service.py
+│       ├── convert_service.py
+│       └── upload_service.py
+├── frontend/                 # Vue 3 前端
+│   ├── src/
+│   │   ├── views/            # 页面组件
+│   │   ├── components/       # 通用组件
+│   │   ├── api/              # API封装
+│   │   ├── stores/           # Pinia状态
+│   │   └── router/           # 路由配置
+│   ├── package.json
+│   └── vite.config.ts
+├── pixi.toml                 # Python依赖配置
+├── README.md                 # 本文件
+├── USER_GUIDE.md             # 用户指南
+└── PROGRESS.md               # 开发进度
 ```
 
 ## 数据格式
@@ -163,6 +212,8 @@ LeRobot v2.1格式
   ├── meta/               # 元数据
   ├── data/chunk-000/     # Parquet数据
   └── videos/chunk-000/   # MP4视频
+  ↓ (mc mirror上传)
+BOS存储 (LeRobot格式)
 ```
 
 ## 测试结果
@@ -210,9 +261,9 @@ A: 转换脚本会在控制台输出详细进度，包括每帧的时间对齐�
 
 ## 开发路线
 
-- [x] **v0.1.0** - CLI工具版本（当前）
-- [ ] **v0.2.0** - 后端API服务
-- [ ] **v0.3.0** - Web管理界面
+- [x] **v0.1.0** - CLI工具版本
+- [x] **v0.2.0** - 后端API服务 + Web管理界面（当前）
+- [ ] **v0.3.0** - UI/UX优化、日志监控
 
 ## 许可证
 
@@ -225,5 +276,5 @@ MIT License
 
 ---
 
-**版本**: v0.1.0
-**最后更新**: 2025-12-28
+**版本**: v0.2.0
+**最后更新**: 2025-12-29

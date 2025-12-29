@@ -243,9 +243,12 @@ class ConvertService:
         episode_name = hdf5_file.stem
         output_episode_dir = output_base_dir / episode_name
 
+        # 使用pixi环境的Python绝对路径
+        PYTHON_PATH = "/data/maozan/code/Citadel_release/.pixi/envs/default/bin/python3"
+
         # 构建命令
         cmd = [
-            "python", "scripts/convert.py",
+            PYTHON_PATH, "scripts/convert.py",
             "--hdf5-path", str(hdf5_file),
             "--output-dir", str(output_episode_dir),
             "--robot-type", config.get('robot_type', 'airbot_play'),
@@ -254,12 +257,17 @@ class ConvertService:
         ]
 
         try:
+            # 继承当前进程的环境变量（包含pixi环境PATH）
+            import os
+            env = os.environ.copy()
+
             result = subprocess.run(
                 cmd,
                 cwd="/home/maozan/code/Citadel_release",
                 capture_output=True,
                 text=True,
-                timeout=300  # 5分钟超时
+                timeout=300,  # 5分钟超时
+                env=env
             )
 
             elapsed = time.time() - start_time

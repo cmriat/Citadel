@@ -7,7 +7,7 @@ FastAPI应用入口，提供任务管理、下载和转换API。
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.routers import tasks, download, convert
+from backend.routers import tasks, download, convert, upload
 
 # 创建FastAPI应用
 app = FastAPI(
@@ -31,6 +31,7 @@ app.add_middleware(
 app.include_router(tasks.router)
 app.include_router(download.router)
 app.include_router(convert.router)
+app.include_router(upload.router)
 
 
 @app.get("/")

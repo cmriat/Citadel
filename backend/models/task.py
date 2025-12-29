@@ -15,6 +15,7 @@ class TaskType(str, Enum):
     """任务类型"""
     DOWNLOAD = "download"
     CONVERT = "convert"
+    UPLOAD = "upload"
 
 
 class TaskStatus(str, Enum):
@@ -43,6 +44,16 @@ class ConvertConfig(BaseModel):
     task: str = Field(default="Fold the laundry", description="任务描述")
     parallel_jobs: int = Field(default=4, description="并发转换数")
     file_pattern: str = Field(default="episode_*.h5", description="文件匹配模式")
+
+
+class UploadConfig(BaseModel):
+    """上传任务配置"""
+    local_dir: str = Field(..., description="本地LeRobot目录")
+    bos_path: str = Field(..., description="BOS目标路径")
+    concurrency: int = Field(default=10, description="并发上传数")
+    include_videos: bool = Field(default=True, description="是否包含视频文件")
+    delete_after: bool = Field(default=False, description="上传后是否删除本地文件")
+    mc_path: str = Field(default="/home/maozan/mc", description="mc可执行文件路径")
 
 
 class TaskProgress(BaseModel):
@@ -157,6 +168,16 @@ class CreateConvertTaskRequest(BaseModel):
     task: str = "Fold the laundry"
     parallel_jobs: int = 4
     file_pattern: str = "episode_*.h5"
+
+
+class CreateUploadTaskRequest(BaseModel):
+    """创建上传任务请求"""
+    local_dir: str
+    bos_path: str
+    concurrency: int = 10
+    include_videos: bool = True
+    delete_after: bool = False
+    mc_path: str = "/home/maozan/mc"
 
 
 class TaskResponse(BaseModel):
