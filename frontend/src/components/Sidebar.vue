@@ -10,9 +10,7 @@ const themeStore = useThemeStore()
 
 const menuItems = [
   { path: '/', title: 'Dashboard', icon: 'mdi:view-dashboard', group: 'main' },
-  { path: '/download', title: 'Download', icon: 'mdi:download', group: 'tasks' },
-  { path: '/convert', title: 'Convert', icon: 'mdi:swap-horizontal', group: 'tasks' },
-  { path: '/upload', title: 'Upload', icon: 'mdi:upload', group: 'tasks' },
+  { path: '/pipeline', title: 'Pipeline', icon: 'mdi:pipe', group: 'tasks' },
   { path: '/status', title: 'Status', icon: 'mdi:chart-line', group: 'system' }
 ]
 

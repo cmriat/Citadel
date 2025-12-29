@@ -138,13 +138,15 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <TaskTable
-        :tasks="tasks"
-        :loading="loading"
-        @view="handleView"
-        @cancel="handleCancel"
-        @delete="handleDelete"
-      />
+      <div class="table-container">
+        <TaskTable
+          :tasks="tasks"
+          :loading="loading"
+          @view="handleView"
+          @cancel="handleCancel"
+          @delete="handleDelete"
+        />
+      </div>
     </div>
 
     <!-- Task Detail Drawer -->
@@ -187,6 +189,18 @@ onUnmounted(() => {
   padding: 24px;
   border: 1px solid;
   transition: all 0.3s ease;
+  display: flex;
+  flex-direction: column;
+  /* 固定高度：视窗高度 - header(60px) - padding(48px) - stats区域(约140px) - 间距 */
+  height: calc(100vh - 280px);
+  min-height: 400px;
+}
+
+.table-container {
+  flex: 1;
+  overflow-y: auto;
+  margin: 0 -24px -24px;
+  padding: 0 24px 24px;
 }
 
 /* Dark theme */

@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import type { Task } from '@/api/index'
 import { Icon } from '@iconify/vue'
+import ProgressDisplay from './ProgressDisplay.vue'
 
 const props = defineProps<{
   task: Task | null
@@ -76,9 +77,20 @@ const formatDuration = (start: string | null, end: string | null) => {
           </div>
           <div class="detail-item">
             <span class="label">Progress</span>
-            <span class="value">{{ task.progress }}%</span>
+            <span class="value">{{ task.progress?.percent || 0 }}%</span>
           </div>
         </div>
+      </div>
+
+      <!-- Progress Display Section -->
+      <div v-if="task.status === 'running'" class="detail-section">
+        <div class="section-title">Live Progress</div>
+        <ProgressDisplay
+          :progress="task.progress"
+          :status="task.status"
+          :show-current-file="true"
+          :show-message="true"
+        />
       </div>
 
       <div class="detail-section">
@@ -105,7 +117,7 @@ const formatDuration = (start: string | null, end: string | null) => {
 
       <div class="detail-section">
         <div class="section-title">Message</div>
-        <div class="message-box">{{ task.message || 'No message' }}</div>
+        <div class="message-box">{{ task.progress?.message || 'No message' }}</div>
       </div>
 
       <div class="detail-section">

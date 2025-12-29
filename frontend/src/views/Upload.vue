@@ -5,6 +5,8 @@ import { ElMessage } from 'element-plus'
 import { startUpload, scanDirs } from '@/api/upload'
 import type { UploadConfig, UploadableDir } from '@/api/upload'
 import { useThemeStore } from '@/stores/theme'
+import ValidatedInput from '@/components/ValidatedInput.vue'
+import TemplateSelector from '@/components/TemplateSelector.vue'
 
 const themeStore = useThemeStore()
 const loading = ref(false)
@@ -97,6 +99,10 @@ const handleStartUpload = async () => {
     loading.value = false
   }
 }
+
+const handleLoadTemplate = (config: Record<string, unknown>) => {
+  Object.assign(form, config)
+}
 </script>
 
 <template>
@@ -112,25 +118,27 @@ const handleStartUpload = async () => {
 
       <el-form :model="form" :rules="rules" label-position="top" class="upload-form">
         <el-form-item label="Local Directory" prop="local_dir">
-          <el-input
+          <ValidatedInput
             v-model="form.local_dir"
             placeholder="./data/lerobot"
-            :prefix-icon="() => h(Icon, { icon: 'mdi:folder' })"
+            validation-type="local-path"
+            prefix-icon="mdi:folder"
           >
             <template #append>
               <el-button @click="handleScanDirs" :loading="scanning">
                 Scan
               </el-button>
             </template>
-          </el-input>
+          </ValidatedInput>
           <div class="form-hint">Local LeRobot format directory</div>
         </el-form-item>
 
         <el-form-item label="BOS Target Path" prop="bos_path">
-          <el-input
+          <ValidatedInput
             v-model="form.bos_path"
             placeholder="bos:/bucket/path/"
-            :prefix-icon="() => h(Icon, { icon: 'mdi:cloud-upload' })"
+            validation-type="bos-path"
+            prefix-icon="mdi:cloud-upload"
           />
           <div class="form-hint">Remote path on Baidu Object Storage</div>
         </el-form-item>
@@ -183,20 +191,25 @@ const handleStartUpload = async () => {
         </div>
 
         <div class="form-actions">
-          <el-button type="primary" @click="handleStartUpload" :loading="loading">
-            <Icon icon="mdi:upload" style="margin-right: 6px" />
-            Start Upload
-          </el-button>
+          <div class="actions-left">
+            <TemplateSelector
+              type="upload"
+              :current-config="form"
+              @load-template="handleLoadTemplate"
+            />
+          </div>
+          <div class="actions-right">
+            <el-button type="primary" @click="handleStartUpload" :loading="loading">
+              <Icon icon="mdi:upload" style="margin-right: 6px" />
+              Start Upload
+            </el-button>
+          </div>
         </div>
       </el-form>
     </div>
   </div>
 </template>
 
-<script lang="ts">
-import { h } from 'vue'
-export default {}
-</script>
 
 <style scoped>
 .upload-page {
@@ -360,6 +373,17 @@ export default {}
 }
 
 .form-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
   margin-top: 32px;
+}
+
+.actions-left,
+.actions-right {
+  display: flex;
+  gap: 8px;
 }
 </style>

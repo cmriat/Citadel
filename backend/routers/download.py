@@ -90,3 +90,37 @@ async def check_connection():
         "mc_version": mc_msg if mc_ok else None,
         "error": bos_msg if not bos_ok else None
     }
+
+
+@router.get("/scan-bos")
+async def scan_bos(bos_path: str):
+    """
+    扫描BOS路径下的HDF5文件
+
+    用于在下载前检查远程路径是否存在可下载的文件。
+
+    Args:
+        bos_path: BOS路径 (如 bos:/citadel-bos/raw_data/)
+
+    Returns:
+        {
+            "ready": bool,
+            "file_count": int,
+            "files": list[str],
+            "error": str | None
+        }
+    """
+    service = get_download_service()
+
+    # 先检查mc工具
+    mc_ok, mc_msg = service.check_mc()
+    if not mc_ok:
+        return {
+            "ready": False,
+            "file_count": 0,
+            "files": [],
+            "error": f"mc tool unavailable: {mc_msg}"
+        }
+
+    # 扫描BOS路径
+    return service.scan_bos(bos_path)

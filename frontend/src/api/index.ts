@@ -23,12 +23,24 @@ api.interceptors.response.use(
 export default api
 
 // Types
+export interface TaskProgress {
+  percent: number
+  current_file?: string
+  total_files: number
+  completed_files: number
+  failed_files: number
+  message?: string
+  bytes_total: number
+  bytes_transferred: number
+  speed_bytes_per_sec: number
+  eta_seconds: number
+}
+
 export interface Task {
   id: string
   type: 'download' | 'convert' | 'upload'
   status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
-  progress: number
-  message: string
+  progress: TaskProgress
   config: Record<string, unknown>
   result: Record<string, unknown> | null
   created_at: string

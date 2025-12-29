@@ -9,22 +9,23 @@ const routes: RouteRecordRaw[] = [
     meta: { title: 'Dashboard', icon: 'mdi:view-dashboard' }
   },
   {
+    path: '/pipeline',
+    name: 'Pipeline',
+    component: () => import('@/views/Pipeline.vue'),
+    meta: { title: 'Pipeline', icon: 'mdi:pipe' }
+  },
+  // Legacy routes - redirect to pipeline with step parameter
+  {
     path: '/download',
-    name: 'Download',
-    component: () => import('@/views/Download.vue'),
-    meta: { title: 'Download', icon: 'mdi:download' }
+    redirect: '/pipeline?step=0'
   },
   {
     path: '/convert',
-    name: 'Convert',
-    component: () => import('@/views/Convert.vue'),
-    meta: { title: 'Convert', icon: 'mdi:swap-horizontal' }
+    redirect: '/pipeline?step=1'
   },
   {
     path: '/upload',
-    name: 'Upload',
-    component: () => import('@/views/Upload.vue'),
-    meta: { title: 'Upload', icon: 'mdi:upload' }
+    redirect: '/pipeline?step=2'
   },
   {
     path: '/status',

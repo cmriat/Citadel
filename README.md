@@ -109,6 +109,25 @@ pixi run convert \
 | `--parallel-jobs` | 并发转换数 | `4` |
 | `--file-pattern` | 文件匹配模式 | `episode_*.h5` |
 
+#### 3. 上传LeRobot数据
+
+将转换后的LeRobot数据上传到BOS：
+
+```bash
+pixi run upload \
+  --local-dir "/home/user/data/fold_laundry/lerobot_v21/" \
+  --bos-path "srgdata/robot/lerobot_data/fold_laundry/" \
+  --concurrency 10
+```
+
+**参数说明：**
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `--local-dir` | 本地LeRobot目录 | `./data/lerobot/` |
+| `--bos-path` | BOS目标路径（不含bos/前缀） | `srgdata/robot/lerobot_data/` |
+| `--concurrency` | 并发上传数 | `10` |
+| `--mc-path` | mc可执行文件路径 | `/home/maozan/mc` |
+
 ## 项目结构
 
 ```
@@ -116,6 +135,7 @@ Citadel_release/
 ├── cli/                      # 命令行工具
 │   ├── download_cli.py       # 下载CLI
 │   ├── convert_cli.py        # 转换CLI
+│   ├── upload_cli.py         # 上传CLI
 │   └── utils/                # 工具模块
 │       ├── mc_executor.py    # mc命令封装
 │       └── progress.py       # 进度跟踪
@@ -261,9 +281,10 @@ A: 转换脚本会在控制台输出详细进度，包括每帧的时间对齐�
 
 ## 开发路线
 
-- [x] **v0.1.0** - CLI工具版本
-- [x] **v0.2.0** - 后端API服务 + Web管理界面（当前）
-- [ ] **v0.3.0** - UI/UX优化、日志监控
+- [x] **v0.1.0** - CLI工具版本（download + convert）
+- [x] **v0.2.0** - 后端API服务 + Web管理界面 + CLI upload（当前）
+- [ ] **v0.2.1** - UI/UX优化
+- [ ] **v0.3.0** - 功能增强、日志监控
 
 ## 许可证
 

@@ -5,6 +5,8 @@ import { ElMessage } from 'element-plus'
 import { startConvert, scanFiles } from '@/api/convert'
 import type { ConvertConfig } from '@/api/convert'
 import { useThemeStore } from '@/stores/theme'
+import ValidatedInput from '@/components/ValidatedInput.vue'
+import TemplateSelector from '@/components/TemplateSelector.vue'
 
 const themeStore = useThemeStore()
 const loading = ref(false)
@@ -92,6 +94,10 @@ const handleStartConvert = async () => {
     loading.value = false
   }
 }
+
+const handleLoadTemplate = (config: Record<string, unknown>) => {
+  Object.assign(form, config)
+}
 </script>
 
 <template>
@@ -109,19 +115,22 @@ const handleStartConvert = async () => {
         <el-row :gutter="20">
           <el-col :span="12">
             <el-form-item label="Input Directory" prop="input_dir">
-              <el-input
+              <ValidatedInput
                 v-model="form.input_dir"
                 placeholder="./data/raw"
-                :prefix-icon="() => h(Icon, { icon: 'mdi:folder-open' })"
+                validation-type="local-path"
+                prefix-icon="mdi:folder-open"
               />
             </el-form-item>
           </el-col>
           <el-col :span="12">
             <el-form-item label="Output Directory" prop="output_dir">
-              <el-input
+              <ValidatedInput
                 v-model="form.output_dir"
                 placeholder="./data/lerobot"
-                :prefix-icon="() => h(Icon, { icon: 'mdi:folder' })"
+                validation-type="local-path"
+                :check-writable="true"
+                prefix-icon="mdi:folder"
               />
             </el-form-item>
           </el-col>
@@ -177,20 +186,25 @@ const handleStartConvert = async () => {
         </div>
 
         <div class="form-actions">
-          <el-button type="primary" @click="handleStartConvert" :loading="loading" :disabled="scannedFiles.length === 0">
-            <Icon icon="mdi:play" style="margin-right: 6px" />
-            Start Convert
-          </el-button>
+          <div class="actions-left">
+            <TemplateSelector
+              type="convert"
+              :current-config="form"
+              @load-template="handleLoadTemplate"
+            />
+          </div>
+          <div class="actions-right">
+            <el-button type="primary" @click="handleStartConvert" :loading="loading" :disabled="scannedFiles.length === 0">
+              <Icon icon="mdi:play" style="margin-right: 6px" />
+              Start Convert
+            </el-button>
+          </div>
         </div>
       </el-form>
     </div>
   </div>
 </template>
 
-<script lang="ts">
-import { h } from 'vue'
-export default {}
-</script>
 
 <style scoped>
 .convert-page {
@@ -319,6 +333,17 @@ export default {}
 }
 
 .form-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
   margin-top: 32px;
+}
+
+.actions-left,
+.actions-right {
+  display: flex;
+  gap: 8px;
 }
 </style>

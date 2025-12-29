@@ -5,6 +5,9 @@ import { ElMessage } from 'element-plus'
 import { startDownload, checkConnection } from '@/api/download'
 import type { DownloadConfig, ConnectionCheck } from '@/api/download'
 import { useThemeStore } from '@/stores/theme'
+import ValidatedInput from '@/components/ValidatedInput.vue'
+import TemplateSelector from '@/components/TemplateSelector.vue'
+import { validateConfig, validateConcurrency } from '@/api/validation'
 
 console.log('[Download] Component setup called at:', new Date().toISOString())
 
@@ -94,6 +97,10 @@ const handleStartDownload = async () => {
     loading.value = false
   }
 }
+
+const handleLoadTemplate = (config: Record<string, unknown>) => {
+  Object.assign(form, config)
+}
 </script>
 
 <template>
@@ -109,19 +116,23 @@ const handleStartDownload = async () => {
 
       <el-form :model="form" :rules="rules" label-position="top" class="download-form">
         <el-form-item label="BOS Path" prop="bos_path">
-          <el-input
+          <ValidatedInput
             v-model="form.bos_path"
-            placeholder="bos:/bucket/path/"
-            :prefix-icon="() => h(Icon, { icon: 'mdi:cloud' })"
+            placeholder="srgdata/robot/raw_data/..."
+            validation-type="bos-path"
+            prefix-icon="mdi:cloud"
+            :show-message="true"
           />
-          <div class="form-hint">Remote path on Baidu Object Storage</div>
+          <div class="form-hint">Remote path on Baidu Object Storage (without bos:/ prefix)</div>
         </el-form-item>
 
         <el-form-item label="Local Path" prop="local_path">
-          <el-input
+          <ValidatedInput
             v-model="form.local_path"
             placeholder="./data/raw"
-            :prefix-icon="() => h(Icon, { icon: 'mdi:folder' })"
+            validation-type="local-path"
+            prefix-icon="mdi:folder"
+            :show-message="true"
           />
           <div class="form-hint">Local directory to save downloaded files</div>
         </el-form-item>
@@ -147,14 +158,23 @@ const handleStartDownload = async () => {
         </div>
 
         <div class="form-actions">
-          <el-button @click="handleCheckConnection" :loading="checking">
-            <Icon icon="mdi:connection" style="margin-right: 6px" />
-            Check Connection
-          </el-button>
-          <el-button type="primary" @click="handleStartDownload" :loading="loading">
-            <Icon icon="mdi:download" style="margin-right: 6px" />
-            Start Download
-          </el-button>
+          <div class="actions-left">
+            <TemplateSelector
+              type="download"
+              :current-config="form"
+              @load-template="handleLoadTemplate"
+            />
+          </div>
+          <div class="actions-right">
+            <el-button @click="handleCheckConnection" :loading="checking">
+              <Icon icon="mdi:connection" style="margin-right: 6px" />
+              Check Connection
+            </el-button>
+            <el-button type="primary" @click="handleStartDownload" :loading="loading">
+              <Icon icon="mdi:download" style="margin-right: 6px" />
+              Start Download
+            </el-button>
+          </div>
         </div>
       </el-form>
     </div>
@@ -162,7 +182,6 @@ const handleStartDownload = async () => {
 </template>
 
 <script lang="ts">
-import { h } from 'vue'
 export default {}
 </script>
 
@@ -260,7 +279,16 @@ export default {}
 
 .form-actions {
   display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 12px;
   margin-top: 32px;
+}
+
+.actions-left,
+.actions-right {
+  display: flex;
+  gap: 8px;
 }
 </style>

@@ -73,3 +73,35 @@ async def scan_dirs(base_dir: str) -> List[Dict[str, Any]]:
     dirs = service.scan_dirs(base_dir)
 
     return dirs
+
+
+@router.get("/scan-episodes")
+async def scan_episodes(
+    base_dir: str,
+    include_thumbnails: bool = True
+) -> List[Dict[str, Any]]:
+    """
+    扫描 LeRobot 目录，返回 episode 详情和 env 相机缩略图预览
+
+    用于在上传前预览 episode 内容，让用户选择要上传的 episode。
+
+    Args:
+        base_dir: LeRobot 数据目录路径
+        include_thumbnails: 是否包含缩略图（默认 True，设为 False 可加速响应）
+
+    Returns:
+        [{
+            "name": "episode_0001",
+            "path": "/path/to/episode_0001",
+            "frame_count": 349,
+            "size": 176000,
+            "thumbnails": [
+                "data:image/jpeg;base64,...",  # 第 1 帧
+                "data:image/jpeg;base64,...",  # 第 1/3 帧
+                "data:image/jpeg;base64,...",  # 第 2/3 帧
+                "data:image/jpeg;base64,..."   # 最后 1 帧
+            ]
+        }]
+    """
+    service = get_upload_service()
+    return service.scan_episodes(base_dir, include_thumbnails=include_thumbnails)

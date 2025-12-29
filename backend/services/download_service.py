@@ -64,6 +64,77 @@ class DownloadService:
         except Exception as e:
             return False, f"连接异常: {str(e)}"
 
+    def scan_bos(self, bos_path: str, file_pattern: str = "*.h5") -> dict:
+        """扫描BOS路径下的文件
+
+        Args:
+            bos_path: BOS路径 (格式: bos:/bucket/path/ 或 bucket/path/)
+            file_pattern: 文件匹配模式
+
+        Returns:
+            dict: {
+                "ready": bool,
+                "file_count": int,
+                "files": list[str],
+                "error": str | None
+            }
+        """
+        try:
+            # 标准化路径
+            if bos_path.startswith("bos:/"):
+                bos_path = bos_path[5:]  # 移除 "bos:/" 前缀
+            bos_path = bos_path.rstrip("/")
+
+            # 执行 mc ls 命令
+            result = subprocess.run(
+                [str(self.mc_path), "ls", f"bos/{bos_path}/"],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+
+            if result.returncode != 0:
+                return {
+                    "ready": False,
+                    "file_count": 0,
+                    "files": [],
+                    "error": result.stderr.strip() or "Failed to list BOS path"
+                }
+
+            # 解析输出，提取 .h5 文件
+            files = []
+            for line in result.stdout.strip().split("\n"):
+                if not line.strip():
+                    continue
+                # mc ls 输出格式: [date] [time] [size] filename
+                parts = line.split()
+                if len(parts) >= 4:
+                    filename = parts[-1]
+                    if filename.endswith(".h5"):
+                        files.append(filename)
+
+            return {
+                "ready": len(files) > 0,
+                "file_count": len(files),
+                "files": files[:20],  # 限制返回数量
+                "error": None
+            }
+
+        except subprocess.TimeoutExpired:
+            return {
+                "ready": False,
+                "file_count": 0,
+                "files": [],
+                "error": "Scan timeout"
+            }
+        except Exception as e:
+            return {
+                "ready": False,
+                "file_count": 0,
+                "files": [],
+                "error": str(e)
+            }
+
     def create_task(self, request: CreateDownloadTaskRequest) -> Task:
         """创建下载任务"""
         task = Task(
@@ -196,13 +267,21 @@ class DownloadService:
             return_code = process.wait()
             elapsed = time.time() - start_time
 
+            # mc mirror 输出的是开始下载的文件，而非完成的文件
+            # 等进程结束后，扫描目录获取实际下载的文件列表
+            actual_files = [f.name for f in local_path.glob("*.h5") if f.is_file()]
+            if actual_files:
+                downloaded_files = actual_files  # 使用实际文件列表
+
             # 计算总大小
             total_size_mb = self._calculate_total_size(local_path, downloaded_files)
 
             # 更新结果
+            # mc mirror 在文件已存在/跳过时可能返回非零码，但实际下载成功
+            # 判断逻辑：有完成的文件 或 返回码为0 均视为成功
             if self._cancel_flags.get(task_id, False):
                 task.cancel()
-            elif return_code == 0:
+            elif return_code == 0 or len(downloaded_files) > 0:
                 task.complete(TaskResult(
                     success=True,
                     total_files=len(downloaded_files),
@@ -211,16 +290,17 @@ class DownloadService:
                     details={
                         'total_size_mb': total_size_mb,
                         'speed_mbps': total_size_mb / elapsed if elapsed > 0 else 0,
-                        'files': downloaded_files
+                        'files': downloaded_files,
+                        'mc_return_code': return_code  # 保留原始返回码用于调试
                     }
                 ))
             else:
                 task.complete(TaskResult(
                     success=False,
-                    total_files=len(downloaded_files),
-                    completed_files=len(downloaded_files),
+                    total_files=0,
+                    completed_files=0,
                     elapsed_seconds=elapsed,
-                    error_message=f"mc命令返回错误码: {return_code}"
+                    error_message=f"mc命令返回错误码: {return_code}，未下载任何文件"
                 ))
 
             db.update(task)

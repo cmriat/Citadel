@@ -14,28 +14,6 @@ const emit = defineEmits<{
   view: [task: Task]
 }>()
 
-const getStatusType = (status: string) => {
-  const map: Record<string, string> = {
-    pending: 'info',
-    running: 'primary',
-    completed: 'success',
-    failed: 'danger',
-    cancelled: 'warning'
-  }
-  return map[status] || 'info'
-}
-
-const getStatusIcon = (status: string) => {
-  const map: Record<string, string> = {
-    pending: 'mdi:clock-outline',
-    running: 'mdi:loading',
-    completed: 'mdi:check-circle',
-    failed: 'mdi:close-circle',
-    cancelled: 'mdi:cancel'
-  }
-  return map[status] || 'mdi:help-circle'
-}
-
 const getTypeIcon = (type: string) => {
   const map: Record<string, string> = {
     download: 'mdi:download',
@@ -54,6 +32,13 @@ const formatTime = (time: string | null) => {
     minute: '2-digit'
   })
 }
+
+const formatSpeed = (bytesPerSec: number): string => {
+  if (bytesPerSec < 1024) return bytesPerSec + ' B/s'
+  if (bytesPerSec < 1024 * 1024) return (bytesPerSec / 1024).toFixed(1) + ' KB/s'
+  if (bytesPerSec < 1024 * 1024 * 1024) return (bytesPerSec / 1024 / 1024).toFixed(1) + ' MB/s'
+  return (bytesPerSec / 1024 / 1024 / 1024).toFixed(2) + ' GB/s'
+}
 </script>
 
 <template>
@@ -63,7 +48,7 @@ const formatTime = (time: string | null) => {
     style="width: 100%"
     row-class-name="task-row"
   >
-    <el-table-column prop="type" label="Type" width="100">
+    <el-table-column prop="type" label="Type" width="120">
       <template #default="{ row }">
         <div class="type-cell">
           <Icon :icon="getTypeIcon(row.type)" />
@@ -72,32 +57,27 @@ const formatTime = (time: string | null) => {
       </template>
     </el-table-column>
 
-    <el-table-column prop="status" label="Status" width="120">
-      <template #default="{ row }">
-        <el-tag :type="getStatusType(row.status)" size="small">
-          <Icon
-            :icon="getStatusIcon(row.status)"
-            :class="{ spinning: row.status === 'running' }"
-            style="margin-right: 4px"
-          />
-          {{ row.status }}
-        </el-tag>
-      </template>
-    </el-table-column>
-
-    <el-table-column prop="progress" label="Progress" width="200">
+    <el-table-column prop="progress" label="Progress" width="240">
       <template #default="{ row }">
         <el-progress
-          :percentage="row.progress"
+          :percentage="row.progress?.percent || 0"
           :status="row.status === 'completed' ? 'success' : row.status === 'failed' ? 'exception' : undefined"
           :stroke-width="8"
         />
       </template>
     </el-table-column>
 
-    <el-table-column prop="message" label="Message" min-width="200">
+    <el-table-column prop="message" label="Info" min-width="200">
       <template #default="{ row }">
-        <span class="message-text">{{ row.message || '-' }}</span>
+        <div class="info-cell">
+          <span v-if="row.progress?.speed_bytes_per_sec > 0" class="speed-text">
+            {{ formatSpeed(row.progress.speed_bytes_per_sec) }}
+          </span>
+          <span v-if="row.progress?.completed_files > 0" class="files-text">
+            {{ row.progress.completed_files }}/{{ row.progress.total_files }} files
+          </span>
+          <span class="message-text">{{ row.progress?.message || '-' }}</span>
+        </div>
       </template>
     </el-table-column>
 
@@ -148,6 +128,23 @@ export default {}
   text-transform: capitalize;
 }
 
+.info-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.speed-text {
+  color: #67c23a;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.files-text {
+  color: #409eff;
+  font-size: 12px;
+}
+
 .message-text {
   color: #a0a0c0;
   font-size: 13px;
@@ -162,11 +159,4 @@ export default {}
   to { transform: rotate(360deg); }
 }
 
-:deep(.task-row) {
-  background-color: #1a1a2e;
-}
-
-:deep(.task-row:hover > td) {
-  background-color: #252545 !important;
-}
 </style>

@@ -64,6 +64,12 @@ class TaskProgress(BaseModel):
     completed_files: int = Field(default=0, description="已完成文件数")
     failed_files: int = Field(default=0, description="失败文件数")
     message: Optional[str] = Field(default=None, description="当前状态消息")
+    # 字节传输统计
+    bytes_total: int = Field(default=0, description="总字节数")
+    bytes_transferred: int = Field(default=0, description="已传输字节数")
+    # 速度和时间估算
+    speed_bytes_per_sec: float = Field(default=0.0, description="传输速度 (字节/秒)")
+    eta_seconds: int = Field(default=0, description="预计剩余秒数")
 
 
 class TaskResult(BaseModel):
@@ -123,7 +129,12 @@ class Task(BaseModel):
         current_file: Optional[str] = None,
         completed_files: Optional[int] = None,
         failed_files: Optional[int] = None,
-        message: Optional[str] = None
+        message: Optional[str] = None,
+        total_files: Optional[int] = None,
+        bytes_total: Optional[int] = None,
+        bytes_transferred: Optional[int] = None,
+        speed_bytes_per_sec: Optional[float] = None,
+        eta_seconds: Optional[int] = None
     ) -> None:
         """更新进度信息"""
         if percent is not None:
@@ -136,6 +147,16 @@ class Task(BaseModel):
             self.progress.failed_files = failed_files
         if message is not None:
             self.progress.message = message
+        if total_files is not None:
+            self.progress.total_files = total_files
+        if bytes_total is not None:
+            self.progress.bytes_total = bytes_total
+        if bytes_transferred is not None:
+            self.progress.bytes_transferred = bytes_transferred
+        if speed_bytes_per_sec is not None:
+            self.progress.speed_bytes_per_sec = speed_bytes_per_sec
+        if eta_seconds is not None:
+            self.progress.eta_seconds = eta_seconds
 
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典（用于存储）"""
@@ -178,6 +199,7 @@ class CreateUploadTaskRequest(BaseModel):
     include_videos: bool = True
     delete_after: bool = False
     mc_path: str = "/home/maozan/mc"
+    exclude_episodes: Optional[List[str]] = None  # 排除的 episode 名称列表
 
 
 class TaskResponse(BaseModel):

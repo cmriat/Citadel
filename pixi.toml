@@ -50,6 +50,10 @@ download = "python -m cli.download_cli"
 # 示例: pixi run convert --input-dir "/path/to/hdf5/" --output-dir "/path/to/output/"
 convert = "python -m cli.convert_cli"
 
+# 上传工具 - 上传LeRobot数据到BOS
+# 示例: pixi run upload --local-dir "./data/lerobot/" --bos-path "srgdata/robot/lerobot_data/"
+upload = "python -m cli.upload_cli"
+
 # =============================================================================
 # 测试和开发工具
 # =============================================================================
@@ -61,4 +65,4 @@ test = "pytest tests/ -v"
 build-frontend = "cd frontend && npm install && npm run build"
 
 # 查看帮助信息
-help = "echo '\n📦 Citadel Release - 使用指南\n\n🌐 Web模式:\n  pixi run dev    - 启动开发服务器\n  pixi run start  - 启动生产服务器\n\n⌨️  CLI模式:\n  pixi run download  - BOS下载工具 (使用 --help 查看参数)\n  pixi run convert   - HDF5转换工具 (使用 --help 查看参数)\n\n🧪 开发工具:\n  pixi run test              - 运行测试\n  pixi run build-frontend    - 构建前端\n'"
+help = "echo '\n📦 Citadel Release - 使用指南\n\n🌐 Web模式:\n  pixi run dev    - 启动开发服务器\n  pixi run start  - 启动生产服务器\n\n⌨️  CLI模式:\n  pixi run download  - BOS下载工具 (使用 --help 查看参数)\n  pixi run convert   - HDF5转换工具 (使用 --help 查看参数)\n  pixi run upload    - BOS上传工具 (使用 --help 查看参数)\n\n🧪 开发工具:\n  pixi run test              - 运行测试\n  pixi run build-frontend    - 构建前端\n'"
