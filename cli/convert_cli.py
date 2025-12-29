@@ -51,9 +51,11 @@ def convert_single_file(
 
     try:
         # 执行转换（重定向输出，避免混乱）
+        # 使用项目根目录（相对于 cli/ 目录的上级目录）
+        project_root = Path(__file__).parent.parent.resolve()
         result = subprocess.run(
             cmd,
-            cwd="/home/maozan/code/Citadel_release",
+            cwd=str(project_root),
             capture_output=True,
             text=True,
             timeout=300  # 5分钟超时

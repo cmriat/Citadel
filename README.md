@@ -10,6 +10,7 @@ Citadel Release 是一套完整的机器人数据管理工具，包含命令行�
 
 - **BOS数据下载**: 使用mc (MinIO Client)高效下载，支持并发控制和进度显示
 - **HDF5格式转换**: 批量转换为LeRobot v2.1格式（包含meta、data、videos）
+- **数据集合并**: 将多个独立episode合并为单个LeRobot数据集
 - **LeRobot数据上传**: 将转换后的数据上传回BOS存储
 - **Web管理界面**: 现代化Vue 3界面，支持任务管理、进度监控
 - **并发处理**: 支持多文件并发转换，提高处理效率
@@ -128,6 +129,41 @@ pixi run upload \
 | `--concurrency` | 并发上传数 | `10` |
 | `--mc-path` | mc可执行文件路径 | `/home/maozan/mc` |
 
+#### 4. 合并LeRobot数据集
+
+将多个独立的LeRobot episode合并为单个数据集：
+
+```bash
+pixi run merge \
+  --sources "./output/episode_0001/" "./output/episode_0002/" "./output/episode_0003/" \
+  --output "./merged_dataset/" \
+  --state-max-dim 14 \
+  --action-max-dim 14 \
+  --fps 25
+```
+
+**参数说明：**
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `--sources` | 源数据集路径列表（支持通配符） | 必填 |
+| `--output` | 输出合并数据集路径 | 必填 |
+| `--state-max-dim` | 状态向量最大维度 | `32` |
+| `--action-max-dim` | 动作向量最大维度 | `32` |
+| `--fps` | 视频帧率 | `25` |
+| `--copy-images` | 是否复制图像文件 | `False` |
+
+**使用场景：**
+- 将HDF5转换后的多个独立episode合并为单个训练集
+- 统一不同维度的state/action向量
+- 自动重新编号episode索引和帧索引
+- 合并元数据、统计信息和任务列表
+
+**示例（使用通配符）：**
+```bash
+# 合并所有 episode_* 目录
+pixi run merge --sources ./converted/episode_* --output ./merged/
+```
+
 ## 项目结构
 
 ```
@@ -136,12 +172,14 @@ Citadel_release/
 │   ├── download_cli.py       # 下载CLI
 │   ├── convert_cli.py        # 转换CLI
 │   ├── upload_cli.py         # 上传CLI
+│   ├── merge_cli.py          # 合并CLI
 │   └── utils/                # 工具模块
 │       ├── mc_executor.py    # mc命令封装
 │       └── progress.py       # 进度跟踪
 ├── scripts/                  # 核心脚本
 │   ├── download.sh           # 下载脚本
-│   └── convert.py            # 转换脚本
+│   ├── convert.py            # 转换脚本
+│   └── merge_lerobot.py      # 合并脚本
 ├── backend/                  # 后端API服务
 │   ├── main.py               # FastAPI入口
 │   ├── models/               # 数据模型
@@ -225,14 +263,19 @@ episode_XXXX/
 
 ```
 BOS存储 (百度对象存储)
-  ↓ (mc mirror下载)
+  ↓ (pixi run download - mc mirror下载)
 本地HDF5目录
-  ↓ (convert.py转换)
-LeRobot v2.1格式
+  ↓ (pixi run convert - convert.py转换)
+多个独立LeRobot Episode
+  ├── episode_0001/
+  ├── episode_0002/
+  └── ...
+  ↓ (pixi run merge - 合并为单个数据集)
+单个LeRobot v2.1数据集
   ├── meta/               # 元数据
   ├── data/chunk-000/     # Parquet数据
   └── videos/chunk-000/   # MP4视频
-  ↓ (mc mirror上传)
+  ↓ (pixi run upload - mc mirror上传)
 BOS存储 (LeRobot格式)
 ```
 
@@ -243,7 +286,9 @@ BOS存储 (LeRobot格式)
 | 操作 | 文件数 | 数据量 | 耗时 | 速度 |
 |------|--------|--------|------|------|
 | 下载 | 18个 | 246MB | 16秒 | 15.22 MB/s |
-| 转换 | 18个 | - | 17秒 | 1.0秒/文件 |
+| 转换 | 232个 | 16GB | 198秒 | 0.9秒/文件 |
+| 合并 | 232个 episodes | 644MB | <1分钟 | - |
+| 上传 | 1856个文件 | 640MB | ~10秒 | 220 files/s |
 
 ## 配置说明
 
@@ -282,7 +327,10 @@ A: 转换脚本会在控制台输出详细进度，包括每帧的时间对齐�
 ## 开发路线
 
 - [x] **v0.1.0** - CLI工具版本（download + convert）
-- [x] **v0.2.0** - 后端API服务 + Web管理界面 + CLI upload（当前）
+- [x] **v0.2.0** - 完整数据处理流水线（当前）
+  - 后端API服务 + Web管理界面
+  - 完整CLI工具链：download + convert + **merge** + upload
+  - 数据集合并功能：支持多episode合并、维度自适应对齐
 - [ ] **v0.2.1** - UI/UX优化
 - [ ] **v0.3.0** - 功能增强、日志监控
 

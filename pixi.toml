@@ -54,6 +54,10 @@ convert = "python -m cli.convert_cli"
 # 示例: pixi run upload --local-dir "./data/lerobot/" --bos-path "srgdata/robot/lerobot_data/"
 upload = "python -m cli.upload_cli"
 
+# 合并工具 - 合并多个LeRobot数据集为一个整体
+# 示例: pixi run merge --sources "./output1/" "./output2/" --output "./merged/"
+merge = "python -m cli.merge_cli"
+
 # =============================================================================
 # 测试和开发工具
 # =============================================================================
