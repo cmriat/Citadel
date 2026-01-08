@@ -456,9 +456,10 @@ local_dir/
 ### 已完成 ✅
 - v0.1.0: CLI工具版本发布（download + convert）
 - v0.2.0: Web管理界面 + 后端API服务 + CLI工具链完整（download + convert + upload + merge）
+- v0.2.1: Pipeline QC质检 + Merge功能（QC组件、结果持久化、三相机预览、快捷键）
 
 ### 进行中 🔄
-- **阶段2.7**: Web前端 QC质检 + Merge集成 → v0.2.1
+- 无
 
 ### 待开始 ⏳
 - **阶段7**: UI/UX优化 → v0.2.2
@@ -557,10 +558,16 @@ local_dir/
   - 调整 merge 默认维度参数 (32→14)
   - 完善 CLI 使用文档
   - 新增 visualize_parquet.py 数据验证工具
-- ⏳ **规划中**: 阶段2.7 - Web前端 QC质检 + Merge集成 → v0.2.1
+- ✅ **2026-01-07**: v0.2.1 发布 - Pipeline QC质检 + Merge 功能 🎉🎉
+  - **QCInspector 组件**: 三相机视频预览、通过/不通过标记
+  - **QC 结果持久化**: 保存到 qc_result.json，支持断点续检
+  - **Merge 服务集成**: 后端 API + 服务层，仅合并通过质检的 episode
+  - **Pipeline 页面优化**: 完整工作流 Download → Convert → QC → Merge → Upload
+  - **操作确认对话框**: 防止误操作
+  - **快捷键支持**: ↑↓导航、P通过、F不通过、1/2/3切换相机
 - ⏳ **规划中**: 阶段7-10（UI优化、功能增强、日志监控、稳定性）
 
 ---
 
 **更新频率**: 每完成一个子任务更新一次
-**最后更新**: 2026-01-07 (规划 QC + Merge 功能)
+**最后更新**: 2026-01-07 (v0.2.1 QC + Merge 功能完成)
