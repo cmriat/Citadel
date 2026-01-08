@@ -149,6 +149,46 @@
 
 ---
 
+## 阶段2.7: Web前端 QC质检 + Merge集成 ⏳
+
+**状态**: 待开始
+**目标版本**: v0.2.1
+**预计时间**: 1-2天
+
+### 功能需求
+将现有的 CLI merge 工具集成到 Web 前端 Pipeline 页面，并新增 QC 质检功能。
+
+### 2.7.1 后端服务 - Merge API
+- [ ] 扩展 `backend/models/task.py` - 添加 MERGE 任务类型
+- [ ] 创建 `backend/services/merge_service.py` - Merge 服务
+- [ ] 创建 `backend/routers/merge.py` - Merge API 路由
+- [ ] 扩展 `backend/routers/upload.py` - 添加视频流端点
+
+### 2.7.2 前端组件 - QC质检
+- [ ] 创建 `QCInspector.vue` - 质检组件
+  - 左侧: Episode 列表 (状态图标 + 点击选中)
+  - 右侧: 视频播放器 (`<video>` 标签)
+  - 底部: 通过/不通过按钮
+  - 统计: 已通过/不通过/待检查数量
+
+### 2.7.3 Pipeline页面集成
+- [ ] 扩展 `frontend/src/api/pipeline.ts` - 添加 QC/Merge API
+- [ ] 修改 `frontend/src/views/Pipeline.vue`
+  - 添加 QC 按钮 (在 Convert 和 Upload 之间)
+  - 添加 Merge 按钮 (显示通过数量)
+  - 引入 QCInspector 组件
+
+### 工作流程
+```
+Download → Convert → QC 质检 → Merge → Upload
+                        ↓
+              视频播放器 → 标记通过/不通过
+                        ↓
+              只合并「通过」的 episode
+```
+
+---
+
 ## 阶段3: 日志和监控 ⏸️
 
 **状态**: 暂缓（合并到阶段9）
@@ -398,8 +438,11 @@
 - v0.1.0: CLI工具版本发布（download + convert）
 - v0.2.0: Web管理界面 + 后端API服务 + CLI工具链完整（download + convert + upload + merge）
 
+### 进行中 🔄
+- **阶段2.7**: Web前端 QC质检 + Merge集成 → v0.2.1
+
 ### 待开始 ⏳
-- **阶段7**: UI/UX优化 → v0.2.1
+- **阶段7**: UI/UX优化 → v0.2.2
 - **阶段8**: 功能增强 → v0.3.0
 - **阶段9**: 日志和监控 → v0.3.1
 - **阶段10**: 稳定性增强 → v0.4.0
@@ -491,9 +534,14 @@
   - 完整的数据处理流水线：下载 → 转换 → 合并 → 上传
   - 4个CLI工具：download / convert / merge / upload
   - Web管理界面支持下载/转换/上传
+- ✅ **2026-01-07**: CLI工具完善
+  - 调整 merge 默认维度参数 (32→14)
+  - 完善 CLI 使用文档
+  - 新增 visualize_parquet.py 数据验证工具
+- ⏳ **规划中**: 阶段2.7 - Web前端 QC质检 + Merge集成 → v0.2.1
 - ⏳ **规划中**: 阶段7-10（UI优化、功能增强、日志监控、稳定性）
 
 ---
 
 **更新频率**: 每完成一个子任务更新一次
-**最后更新**: 2025-12-29 (v0.2.0最终版发布，merge工具完成)
+**最后更新**: 2026-01-07 (规划 QC + Merge 功能)
