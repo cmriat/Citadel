@@ -80,12 +80,12 @@ def convert_single_file(
 
 
 def convert(
-    input_dir: str = "/home/maozan/code/Citadel_release/test_data/download_test/",
-    output_dir: str = "/home/maozan/code/Citadel_release/test_data/convert_test/",
+    input_dir: str = "/home/jovyan/code/vla/temp_datas/1229_qz2/raw",
+    output_dir: str = "/home/jovyan/code/vla/temp_datas/1229_qz2/lerobot/",
     robot_type: str = "airbot_play",
     fps: int = 25,
     task: str = "Fold the laundry",
-    parallel_jobs: int = 4,
+    parallel_jobs: int = 10,
     file_pattern: str = "episode_*.h5"
 ):
     """

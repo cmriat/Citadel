@@ -31,7 +31,7 @@ class UploadProgress:
 class UploadCLI:
     """上传命令行工具"""
 
-    def __init__(self, mc_path: str = "/home/maozan/mc"):
+    def __init__(self, mc_path: str = "/home/jovyan/mc"):
         self.mc_path = mc_path
         self.progress = UploadProgress()
 
@@ -57,7 +57,7 @@ class UploadCLI:
         """检查BOS连接"""
         try:
             result = subprocess.run(
-                [self.mc_path, "ls", "bos/"],
+                [self.mc_path, "ls", "bos/srgdata/"],
                 capture_output=True,
                 text=True,
                 timeout=10
@@ -208,7 +208,7 @@ def upload(
     local_dir: str = "./data/lerobot/",
     bos_path: str = "srgdata/robot/lerobot_data/",
     concurrency: int = 10,
-    mc_path: str = "/home/maozan/mc"
+    mc_path: str = "/home/jovyan/mc"
 ):
     """
     上传LeRobot数据到BOS

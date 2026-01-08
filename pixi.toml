@@ -18,6 +18,8 @@ pyarrow = ">=22.0.0,<23"
 pandas = ">=2.3.3,<3"
 av = "*"
 pillow = "*"
+# 可视化（用于数据验证）
+matplotlib = ">=3.7.0"
 # 命令行工具
 tyro = "*"
 termcolor = "*"
@@ -57,6 +59,10 @@ upload = "python -m cli.upload_cli"
 # 合并工具 - 合并多个LeRobot数据集为一个整体
 # 示例: pixi run merge --sources "./output1/" "./output2/" --output "./merged/"
 merge = "python -m cli.merge_cli"
+
+# 可视化工具 - 验证转换后的LeRobot数据
+# 示例: pixi run visualize /path/to/episode_0001
+visualize = "python scripts/visualize_parquet.py"
 
 # =============================================================================
 # 测试和开发工具

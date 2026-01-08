@@ -26,7 +26,7 @@ from backend.services.database import get_database
 class UploadService:
     """上传服务类"""
 
-    def __init__(self, mc_path: str = "/home/maozan/mc"):
+    def __init__(self, mc_path: str = "/home/jovyan/mc"):
         self.mc_path = mc_path
         self.db = get_database()
         self._running_tasks: Dict[str, subprocess.Popen] = {}

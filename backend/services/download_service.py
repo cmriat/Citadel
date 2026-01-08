@@ -24,7 +24,7 @@ from backend.services.database import get_database
 class DownloadService:
     """下载服务"""
 
-    def __init__(self, mc_path: str = "/home/maozan/mc"):
+    def __init__(self, mc_path: str = "/home/jovyan/mc"):
         self.mc_path = Path(mc_path)
         self._running_tasks: dict[str, threading.Thread] = {}
         self._cancel_flags: dict[str, bool] = {}
@@ -51,7 +51,7 @@ class DownloadService:
         """检查BOS连接"""
         try:
             result = subprocess.run(
-                [str(self.mc_path), "ls", "bos/"],
+                [str(self.mc_path), "ls", "bos/srgdata/"],
                 capture_output=True,
                 text=True,
                 timeout=10

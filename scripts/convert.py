@@ -94,6 +94,37 @@ def align_data_to_reference(ref_timestamps, data, data_timestamps, data_name):
     return aligned_data
 
 
+def map_master_eef_to_slave_mapping(master_eef: np.ndarray, slave_mapping_stats: dict) -> np.ndarray:
+    """将master的eef_gripper_joint_pos映射到slave的gripper_mapping_controller_pos范围
+
+    Args:
+        master_eef: [N, 1] master的eef夹爪原始值
+        slave_mapping_stats: slave mapping的统计信息 {'min': float, 'max': float}
+
+    Returns:
+        mapped_values: [N, 1] 映射后的值，范围与slave_mapping一致
+
+    注意：master_eef和slave_mapping的物理意义相反：
+        - master_eef: 小值=打开, 大值=闭合
+        - slave_mapping: 小值=闭合, 大值=打开
+        因此需要反向映射：master_min->target_max, master_max->target_min
+    """
+    # 计算master_eef的范围（使用当前数据的实际范围）
+    master_min = master_eef.min()
+    master_max = master_eef.max()
+
+    # 获取目标范围（slave_mapping）
+    target_min = slave_mapping_stats['min']
+    target_max = slave_mapping_stats['max']
+
+    # 反向线性映射：master_min（打开）-> target_max（打开）, master_max（闭合）-> target_min（闭合）
+    # y = target_max - (x - x_min) / (x_max - x_min) * (y_max - y_min)
+    mapped = target_max - (master_eef - master_min) / (master_max - master_min + 1e-8) * \
+             (target_max - target_min)
+
+    return mapped
+
+
 def load_episode_v1_format(ep_path: Path) -> Dict:
     """加载online_test_hdf5_v1格式的Episode数据
 
@@ -173,7 +204,7 @@ def load_episode_v1_format(ep_path: Path) -> Dict:
 
         # 3.1 读取left slave数据
         left_joints_raw = reconstruct_joint_vector(f["joints/left_slave"], 6)
-        left_gripper_raw = f["joints/left_slave/eef_gripper_joint_pos"][:][:, np.newaxis]
+        left_gripper_raw = f["joints/left_slave/gripper_mapping_controller_pos"][:][:, np.newaxis]
 
         # 3.2 读取left slave时间戳
         left_joint_sec = f["joints/left_slave/timestamp_sec"][:]
@@ -182,7 +213,7 @@ def load_episode_v1_format(ep_path: Path) -> Dict:
 
         # 3.3 读取right slave数据
         right_joints_raw = reconstruct_joint_vector(f["joints/right_slave"], 6)
-        right_gripper_raw = f["joints/right_slave/eef_gripper_joint_pos"][:][:, np.newaxis]
+        right_gripper_raw = f["joints/right_slave/gripper_mapping_controller_pos"][:][:, np.newaxis]
 
         # 3.4 读取right slave时间戳
         right_joint_sec = f["joints/right_slave/timestamp_sec"][:]
@@ -211,6 +242,13 @@ def load_episode_v1_format(ep_path: Path) -> Dict:
             left_joints_cmd_raw = reconstruct_joint_vector(f["joints/left_master"], 6)
             left_gripper_cmd_raw = f["joints/left_master/eef_gripper_joint_pos"][:][:, np.newaxis]
 
+            # 获取left slave mapping统计信息用于映射
+            left_slave_mapping = f["joints/left_slave/gripper_mapping_controller_pos"][:]
+            left_mapping_stats = {
+                'min': left_slave_mapping.min(),
+                'max': left_slave_mapping.max()
+            }
+
             # 读取left master时间戳
             left_cmd_sec = f["joints/left_master/timestamp_sec"][:]
             left_cmd_nsec = f["joints/left_master/timestamp_nanosec"][:]
@@ -220,6 +258,13 @@ def load_episode_v1_format(ep_path: Path) -> Dict:
             right_joints_cmd_raw = reconstruct_joint_vector(f["joints/right_master"], 6)
             right_gripper_cmd_raw = f["joints/right_master/eef_gripper_joint_pos"][:][:, np.newaxis]
 
+            # 获取right slave mapping统计信息用于映射
+            right_slave_mapping = f["joints/right_slave/gripper_mapping_controller_pos"][:]
+            right_mapping_stats = {
+                'min': right_slave_mapping.min(),
+                'max': right_slave_mapping.max()
+            }
+
             # 读取right master时间戳
             right_cmd_sec = f["joints/right_master/timestamp_sec"][:]
             right_cmd_nsec = f["joints/right_master/timestamp_nanosec"][:]
@@ -227,9 +272,15 @@ def load_episode_v1_format(ep_path: Path) -> Dict:
 
             # 对齐到基准时间戳
             left_joints_cmd = align_data_to_reference(reference_timestamps, left_joints_cmd_raw, left_cmd_timestamps, 'left_joints_cmd')
-            left_gripper_cmd = align_data_to_reference(reference_timestamps, left_gripper_cmd_raw, left_cmd_timestamps, 'left_gripper_cmd')
+            left_gripper_cmd_aligned = align_data_to_reference(reference_timestamps, left_gripper_cmd_raw, left_cmd_timestamps, 'left_gripper_cmd')
             right_joints_cmd = align_data_to_reference(reference_timestamps, right_joints_cmd_raw, right_cmd_timestamps, 'right_joints_cmd')
-            right_gripper_cmd = align_data_to_reference(reference_timestamps, right_gripper_cmd_raw, right_cmd_timestamps, 'right_gripper_cmd')
+            right_gripper_cmd_aligned = align_data_to_reference(reference_timestamps, right_gripper_cmd_raw, right_cmd_timestamps, 'right_gripper_cmd')
+
+            # 映射夹爪值到slave mapping范围
+            left_gripper_cmd = map_master_eef_to_slave_mapping(left_gripper_cmd_aligned, left_mapping_stats)
+            right_gripper_cmd = map_master_eef_to_slave_mapping(right_gripper_cmd_aligned, right_mapping_stats)
+
+            print(f"  ✓ 夹爪映射: master_eef -> slave_mapping 范围")
 
             action = np.concatenate([
                 left_joints_cmd,
@@ -238,7 +289,7 @@ def load_episode_v1_format(ep_path: Path) -> Dict:
                 right_gripper_cmd
             ], axis=1).astype(np.float32)
 
-            print("\n✅ 使用master数据作为action")
+            print("\n✅ 使用master数据作为action (夹爪已映射)")
         else:
             action = state.copy()
             print("\n⚠️  警告: master数据不存在，复制slave作为action")
@@ -261,8 +312,8 @@ def encode_video_frames(frames: np.ndarray, output_path: Path, fps: int = 30):
 
     container = av.open(str(output_path), mode='w')
     stream = container.add_stream('h264', rate=fps)
-    stream.width = frames.shape[2]   # 640
-    stream.height = frames.shape[1]  # 480
+    stream.width = frames.shape[2]   # W from [N, H, W, C]
+    stream.height = frames.shape[1]  # H from [N, H, W, C]
     stream.pix_fmt = 'yuv420p'
     stream.options = {'crf': '23'}
 
@@ -321,7 +372,9 @@ def generate_info_json(
     total_frames: int,
     fps: int,
     robot_type: str,
-    dataset_name: str
+    dataset_name: str,
+    image_height: int = 480,
+    image_width: int = 640
 ):
     """Generate info.json metadata file in meta/ directory."""
     info = {
@@ -366,11 +419,11 @@ def generate_info_json(
             },
             "observation.images.cam_env": {
                 "dtype": "video",
-                "shape": [480, 640, 3],
+                "shape": [image_height, image_width, 3],
                 "names": ["height", "width", "channels"],
                 "info": {
-                    "video.height": 480,
-                    "video.width": 640,
+                    "video.height": image_height,
+                    "video.width": image_width,
                     "video.codec": "libx264",
                     "video.pix_fmt": "rgb24",
                     "video.is_depth_map": False,
@@ -381,11 +434,11 @@ def generate_info_json(
             },
             "observation.images.cam_left_wrist": {
                 "dtype": "video",
-                "shape": [480, 640, 3],
+                "shape": [image_height, image_width, 3],
                 "names": ["height", "width", "channels"],
                 "info": {
-                    "video.height": 480,
-                    "video.width": 640,
+                    "video.height": image_height,
+                    "video.width": image_width,
                     "video.codec": "libx264",
                     "video.pix_fmt": "rgb24",
                     "video.is_depth_map": False,
@@ -396,11 +449,11 @@ def generate_info_json(
             },
             "observation.images.cam_right_wrist": {
                 "dtype": "video",
-                "shape": [480, 640, 3],
+                "shape": [image_height, image_width, 3],
                 "names": ["height", "width", "channels"],
                 "info": {
-                    "video.height": 480,
-                    "video.width": 640,
+                    "video.height": image_height,
+                    "video.width": image_width,
                     "video.codec": "libx264",
                     "video.pix_fmt": "rgb24",
                     "video.is_depth_map": False,
@@ -615,7 +668,11 @@ def convert_hdf5_to_lerobot_v21(
 
     # 5. Generate metadata files in meta/ directory
     print("\nGenerating metadata files...")
-    generate_info_json(output_dir, num_frames, fps, robot_type, dataset_name)
+    # Get actual image dimensions from loaded data
+    image_height = episode_data['images_env'].shape[1]
+    image_width = episode_data['images_env'].shape[2]
+    generate_info_json(output_dir, num_frames, fps, robot_type, dataset_name,
+                       image_height=image_height, image_width=image_width)
     print("  ✓ meta/info.json")
 
     generate_tasks_jsonl(output_dir, task)

@@ -32,7 +32,7 @@ class DownloadConfig(BaseModel):
     bos_path: str = Field(..., description="BOS远程路径")
     local_path: str = Field(..., description="本地保存路径")
     concurrency: int = Field(default=10, description="并发下载数")
-    mc_path: str = Field(default="/home/maozan/mc", description="mc可执行文件路径")
+    mc_path: str = Field(default="/home/jovyan/mc", description="mc可执行文件路径")
 
 
 class ConvertConfig(BaseModel):
@@ -53,7 +53,7 @@ class UploadConfig(BaseModel):
     concurrency: int = Field(default=10, description="并发上传数")
     include_videos: bool = Field(default=True, description="是否包含视频文件")
     delete_after: bool = Field(default=False, description="上传后是否删除本地文件")
-    mc_path: str = Field(default="/home/maozan/mc", description="mc可执行文件路径")
+    mc_path: str = Field(default="/home/jovyan/mc", description="mc可执行文件路径")
 
 
 class TaskProgress(BaseModel):
@@ -177,7 +177,7 @@ class CreateDownloadTaskRequest(BaseModel):
     bos_path: str
     local_path: str
     concurrency: int = 10
-    mc_path: str = "/home/maozan/mc"
+    mc_path: str = "/home/jovyan/mc"
 
 
 class CreateConvertTaskRequest(BaseModel):
@@ -198,7 +198,7 @@ class CreateUploadTaskRequest(BaseModel):
     concurrency: int = 10
     include_videos: bool = True
     delete_after: bool = False
-    mc_path: str = "/home/maozan/mc"
+    mc_path: str = "/home/jovyan/mc"
     exclude_episodes: Optional[List[str]] = None  # 排除的 episode 名称列表
 
 

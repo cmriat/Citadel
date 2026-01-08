@@ -2,9 +2,27 @@
 LeRobot数据集合并命令行工具
 
 使用示例:
+    # 合并指定的几个数据集
     pixi run merge --sources "./output1/" "./output2/" --output "./merged/"
-    pixi run merge --sources "./data1/" "./data2/" "./data3/" --output "./combined/" --state-max-dim 14 --action-max-dim 14
+
+    # 合并多个数据集，指定维度和帧率
+    pixi run merge --sources "./data1/" "./data2/" "./data3/" --output "./combined/" --state-max-dim 14 --action-max-dim 14 --fps 25
+
+    # 使用通配符合并目录下所有episode（推荐方式）
+    pixi run merge --sources /path/to/lerobot/episode_* --output /path/to/merged
+
+    # 实际示例：合并1229_qz2数据集的所有episode
+    pixi run merge \\
+        --sources /home/jovyan/code/vla/temp_datas/1229_qz2/lerobot/episode_* \\
+        --output /home/jovyan/code/vla/temp_datas/1229_qz2/merged
+
+    # 查看帮助
     pixi run merge --help
+
+注意:
+    - 所有源数据集必须是LeRobot v2.1格式（包含meta/info.json）
+    - 使用通配符时，shell会自动展开为所有匹配的目录
+    - 合并后的数据集会重新编号episode（从0开始）
 """
 
 import tyro
@@ -23,8 +41,8 @@ from scripts.merge_lerobot import merge_datasets
 def merge(
     sources: list[str],
     output: str,
-    state_max_dim: int = 32,
-    action_max_dim: int = 32,
+    state_max_dim: int = 14,
+    action_max_dim: int = 14,
     fps: int = 25,
     copy_images: bool = False,
 ):

@@ -82,10 +82,10 @@ class ProgressTracker:
 
 
 def download(
-    bos_path: str = "srgdata/robot/raw_data/upload_test/online_test_hdf5_v1/fold_laundry/",
-    local_path: str = "/home/maozan/code/Citadel_release/test_data/download_test/",
+    bos_path: str = "srgdata/robot/raw_data/upload_test/1231_qz2_laundry_online_data_upload/quad_arm_task/",
+    local_path: str = "/home/jovyan/code/vla/temp_datas/1231_qz2/raw/",
     concurrency: int = 10,
-    mc_path: str = "/home/maozan/mc"
+    mc_path: str = "/home/jovyan/mc"
 ):
     """
     从BOS下载HDF5文件

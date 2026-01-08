@@ -15,7 +15,7 @@ from pathlib import Path
 class MCExecutor:
     """mc命令执行器，带进度回调"""
 
-    def __init__(self, mc_path: str = "/home/maozan/mc"):
+    def __init__(self, mc_path: str = "/home/jovyan/mc"):
         self.mc_path = Path(mc_path)
 
         if not self.mc_path.exists():
@@ -138,7 +138,7 @@ class MCExecutor:
             (是否连接成功, 错误信息)
         """
         try:
-            cmd = [str(self.mc_path), "ls", "bos/"]
+            cmd = [str(self.mc_path), "ls", "bos/srgdata/"]
             result = subprocess.run(
                 cmd,
                 capture_output=True,
