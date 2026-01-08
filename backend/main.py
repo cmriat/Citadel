@@ -7,13 +7,13 @@ FastAPI应用入口，提供任务管理、下载和转换API。
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.routers import tasks, download, convert, upload, validation
+from backend.routers import tasks, download, convert, upload, validation, merge
 
 # 创建FastAPI应用
 app = FastAPI(
     title="Citadel Release API",
     description="BOS下载和HDF5转换管理系统API",
-    version="0.2.0",
+    version="0.2.1",
     docs_url="/docs",
     redoc_url="/redoc"
 )
@@ -32,6 +32,7 @@ app.include_router(tasks.router)
 app.include_router(download.router)
 app.include_router(convert.router)
 app.include_router(upload.router)
+app.include_router(merge.router)
 app.include_router(validation.router)
 
 
@@ -40,13 +41,14 @@ async def root():
     """API根路径"""
     return {
         "name": "Citadel Release API",
-        "version": "0.2.0",
+        "version": "0.2.1",
         "docs": "/docs",
         "endpoints": {
             "tasks": "/api/tasks",
             "download": "/api/download",
             "convert": "/api/convert",
             "upload": "/api/upload",
+            "merge": "/api/merge",
             "validate": "/api/validate"
         }
     }
@@ -100,7 +102,9 @@ async def stats():
         },
         "by_type": {
             "download": db.count(task_type=TaskType.DOWNLOAD),
-            "convert": db.count(task_type=TaskType.CONVERT)
+            "convert": db.count(task_type=TaskType.CONVERT),
+            "upload": db.count(task_type=TaskType.UPLOAD),
+            "merge": db.count(task_type=TaskType.MERGE)
         }
     }
 

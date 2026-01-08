@@ -104,6 +104,8 @@ async def cancel_task(task_id: str):
     """
     from backend.services.download_service import get_download_service
     from backend.services.convert_service import get_convert_service
+    from backend.services.upload_service import get_upload_service
+    from backend.services.merge_service import get_merge_service
 
     db = get_database()
     task = db.get(task_id)
@@ -117,8 +119,14 @@ async def cancel_task(task_id: str):
     # 根据任务类型调用对应服务取消
     if task.type == TaskType.DOWNLOAD:
         success = get_download_service().cancel_task(task_id)
-    else:
+    elif task.type == TaskType.CONVERT:
         success = get_convert_service().cancel_task(task_id)
+    elif task.type == TaskType.UPLOAD:
+        success = get_upload_service().cancel_task(task_id)
+    elif task.type == TaskType.MERGE:
+        success = get_merge_service().cancel_task(task_id)
+    else:
+        raise HTTPException(status_code=400, detail=f"未知任务类型: {task.type}")
 
     if not success:
         raise HTTPException(status_code=500, detail="取消任务失败")

@@ -1,18 +1,19 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
 import { Icon } from '@iconify/vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { useThemeStore } from '@/stores/theme'
 import { useTaskStore } from '@/stores/tasks'
 import {
   runStep, derivePaths, hasPathTemplate, resolvePath,
-  checkDownloadReady, checkConvertReady, checkUploadReady,
-  scanEpisodes, runUploadWithExclude
+  checkDownloadReady, checkConvertReady, checkMergedReady,
+  scanEpisodes, runMerge, getMergeProgress,
+  saveQCResult, loadQCResult, uploadMerged
 } from '@/api/pipeline'
-import type { PipelineConfig, CheckResult, Episode } from '@/api/pipeline'
+import type { PipelineConfig, CheckResult, Episode, QCResult, MergeConfig, QCResultResponse } from '@/api/pipeline'
 import ValidatedInput from '@/components/ValidatedInput.vue'
-import EpisodeSelector from '@/components/EpisodeSelector.vue'
 import TaskPreviewBar from '@/components/TaskPreviewBar.vue'
+import QCInspector from '@/components/QCInspector.vue'
 
 const themeStore = useThemeStore()
 const taskStore = useTaskStore()
@@ -43,8 +44,15 @@ const saveConfig = (config: PipelineConfig) => {
 }
 
 const config = reactive<PipelineConfig>(loadConfig())
-const loading = ref<'download' | 'convert' | 'upload' | null>(null)
+const loading = ref<'download' | 'convert' | 'upload' | 'qc' | 'merge' | null>(null)
 const paths = computed(() => derivePaths(config))
+
+// ============ QC + Merge State ============
+const showQCInspector = ref(false)
+const qcEpisodes = ref<Episode[]>([])
+const qcLoading = ref(false)
+const qcResult = ref<QCResult | null>(null)
+const mergeTaskId = ref<string | null>(null)
 
 // ============ Status Check ============
 interface StepStatus {
@@ -56,18 +64,18 @@ interface StepStatus {
 const status = reactive({
   download: { ready: null, count: 0, message: 'Click to check' } as StepStatus,
   convert: { ready: null, count: 0, message: 'Click to check' } as StepStatus,
-  upload: { ready: null, count: 0, message: 'Click to check' } as StepStatus
+  merged: { ready: null, count: 0, message: 'Click to check' } as StepStatus
 })
 
 const statusTooltips: Record<string, string> = {
   download: '检测 BOS 源路径是否有 HDF5 文件',
   convert: '检测本地 raw 目录是否有已下载的文件',
-  upload: '检测本地 lerobot 目录是否有转换后的数据'
+  merged: '检测本地 merged 目录是否有合并后的数据'
 }
 
-const checking = ref<'download' | 'convert' | 'upload' | 'all' | null>(null)
+const checking = ref<'download' | 'convert' | 'merged' | 'all' | null>(null)
 
-const runCheck = async (step: 'download' | 'convert' | 'upload') => {
+const runCheck = async (step: 'download' | 'convert' | 'merged') => {
   checking.value = step
   status[step] = { ready: null, count: 0, message: 'Checking...' }
 
@@ -82,8 +90,8 @@ const runCheck = async (step: 'download' | 'convert' | 'upload') => {
     case 'convert':
       result = await checkConvertReady(resolvedDir)
       break
-    case 'upload':
-      result = await checkUploadReady(resolvedDir)
+    case 'merged':
+      result = await checkMergedReady(resolvedDir)
       break
   }
 
@@ -96,17 +104,48 @@ const runAllChecks = async () => {
   await Promise.all([
     runCheck('download'),
     runCheck('convert'),
-    runCheck('upload')
+    runCheck('merged')
   ])
   checking.value = null
 }
 
 // ============ Actions ============
-const handleRunStep = async (step: 'download' | 'convert' | 'upload') => {
-  // Upload 步骤特殊处理：打开选择器
-  if (step === 'upload') {
-    await openEpisodeSelector()
-    return
+
+// 确认信息配置
+const confirmMessages = {
+  download: {
+    title: '确认下载',
+    message: (c: PipelineConfig) => `即将从 BOS 下载数据：\n\n源路径：${c.bos_source}\n本地目录：${resolvePath(c.local_dir)}/raw\n并发数：${c.concurrency}`,
+  },
+  convert: {
+    title: '确认转换',
+    message: (c: PipelineConfig) => `即将转换 HDF5 数据为 LeRobot 格式：\n\n输入目录：${resolvePath(c.local_dir)}/raw\n输出目录：${resolvePath(c.local_dir)}/lerobot\n机器人类型：${c.robot_type}\nFPS：${c.fps}`,
+  },
+  merge: {
+    title: '确认合并',
+    message: (c: PipelineConfig, passedCount: number) => `即将合并通过质检的 episode：\n\n通过数量：${passedCount} 个\n输出目录：${resolvePath(c.local_dir)}/merged\nFPS：${c.fps}`,
+  },
+  upload: {
+    title: '确认上传',
+    message: (c: PipelineConfig) => `即将上传合并后的数据集到 BOS：\n\n本地目录：${resolvePath(c.local_dir)}/merged\n目标路径：${c.bos_target}\n并发数：${c.concurrency}`,
+  }
+}
+
+const handleRunStep = async (step: 'download' | 'convert') => {
+  // 弹出确认对话框
+  try {
+    await ElMessageBox.confirm(
+      confirmMessages[step].message(config),
+      confirmMessages[step].title,
+      {
+        confirmButtonText: '开始',
+        cancelButtonText: '取消',
+        type: 'info',
+        customStyle: { whiteSpace: 'pre-line' }
+      }
+    )
+  } catch {
+    return // 用户取消
   }
 
   loading.value = step
@@ -115,45 +154,156 @@ const handleRunStep = async (step: 'download' | 'convert' | 'upload') => {
     ElMessage.success(`${step} task: ${task.id}`)
     saveConfig(config)
     // Refresh status after task created
-    setTimeout(() => runCheck(step === 'download' ? 'convert' : 'upload'), 1000)
+    setTimeout(() => runCheck(step === 'download' ? 'convert' : 'merged'), 1000)
   } catch (e) { ElMessage.error((e as Error).message) }
   finally { loading.value = null }
 }
 
-
-// ============ Episode Selector ============
-const showEpisodeSelector = ref(false)
-const episodes = ref<Episode[]>([])
-const scanningEpisodes = ref(false)
-
-const openEpisodeSelector = async () => {
-  scanningEpisodes.value = true
-  showEpisodeSelector.value = true
+// Upload merged dataset
+const handleUpload = async () => {
+  // 弹出确认对话框
   try {
-    // 解析日期模板，确保使用正确的路径
-    const resolvedDir = resolvePath(config.local_dir)
-    console.log('[openEpisodeSelector] config.local_dir:', config.local_dir)
-    console.log('[openEpisodeSelector] resolvedDir:', resolvedDir)
-    const result = await scanEpisodes(resolvedDir)
-    console.log('[openEpisodeSelector] result:', result, 'length:', result?.length)
-    episodes.value = result
-  } finally {
-    scanningEpisodes.value = false
+    await ElMessageBox.confirm(
+      confirmMessages.upload.message(config),
+      confirmMessages.upload.title,
+      {
+        confirmButtonText: '开始上传',
+        cancelButtonText: '取消',
+        type: 'info',
+        customStyle: { whiteSpace: 'pre-line' }
+      }
+    )
+  } catch {
+    return // 用户取消
   }
-}
 
-const handleUploadConfirm = async (excludeEpisodes: string[]) => {
   loading.value = 'upload'
   try {
-    const task = await runUploadWithExclude(config, excludeEpisodes)
-    const uploadCount = episodes.value.length - excludeEpisodes.length
-    ElMessage.success(`Upload started: ${uploadCount} episodes (task: ${task.id})`)
+    const task = await uploadMerged(config)
+    ElMessage.success(`Upload started: merged dataset (task: ${task.id})`)
     saveConfig(config)
-    setTimeout(() => runCheck('upload'), 1000)
+    setTimeout(() => runCheck('merged'), 1000)
   } catch (e) {
     ElMessage.error((e as Error).message)
   } finally {
     loading.value = null
+  }
+}
+
+// ============ QC Inspector ============
+const openQCInspector = async () => {
+  qcLoading.value = true
+  showQCInspector.value = true
+  try {
+    const resolvedDir = resolvePath(config.local_dir)
+    console.log('[openQCInspector] resolvedDir:', resolvedDir)
+    const result = await scanEpisodes(resolvedDir)
+    console.log('[openQCInspector] episodes count:', result?.length)
+    qcEpisodes.value = result
+  } catch (e) {
+    ElMessage.error(`扫描 episode 失败: ${(e as Error).message}`)
+  } finally {
+    qcLoading.value = false
+  }
+}
+
+const handleQCConfirm = async (result: QCResult) => {
+  qcResult.value = result
+  ElMessage.success(`质检完成: ${result.passed.length} 通过, ${result.failed.length} 不通过`)
+  showQCInspector.value = false
+
+  // 保存 QC 结果到文件
+  try {
+    const resolvedDir = resolvePath(config.local_dir)
+    const lerobotDir = `${resolvedDir}/lerobot`
+    await saveQCResult(lerobotDir, result)
+    console.log('[handleQCConfirm] QC result saved to file')
+  } catch (e) {
+    console.error('[handleQCConfirm] Failed to save QC result:', e)
+  }
+}
+
+// ============ Merge ============
+const handleMerge = async () => {
+  if (!qcResult.value || qcResult.value.passed.length === 0) {
+    ElMessage.warning('没有通过质检的 episode，无法执行合并')
+    return
+  }
+
+  // 弹出确认对话框
+  try {
+    await ElMessageBox.confirm(
+      confirmMessages.merge.message(config, qcResult.value.passed.length),
+      confirmMessages.merge.title,
+      {
+        confirmButtonText: '开始合并',
+        cancelButtonText: '取消',
+        type: 'info',
+        customStyle: { whiteSpace: 'pre-line' }
+      }
+    )
+  } catch {
+    return // 用户取消
+  }
+
+  loading.value = 'merge'
+  try {
+    const resolvedDir = resolvePath(config.local_dir)
+    const lerobotDir = `${resolvedDir}/lerobot`
+
+    // 构建 merge 配置：将通过的 episode 合并
+    // output_dir 与 raw/lerobot 同级
+    const mergeConfig: MergeConfig = {
+      source_dirs: qcResult.value.passed.map(ep => `${lerobotDir}/${ep}`),
+      output_dir: `${resolvedDir}/merged`,
+      fps: config.fps,
+      copy_images: false
+    }
+
+    console.log('[handleMerge] mergeConfig:', mergeConfig)
+    const task = await runMerge(mergeConfig)
+    mergeTaskId.value = task.id
+    ElMessage.success(`Merge 任务已启动: ${task.id}`)
+    saveConfig(config)
+
+    // 更新任务列表
+    taskStore.fetchTasks()
+  } catch (e) {
+    ElMessage.error(`Merge 失败: ${(e as Error).message}`)
+  } finally {
+    loading.value = null
+  }
+}
+
+// QC 状态计算
+const qcStats = computed(() => {
+  if (!qcResult.value) return null
+  return {
+    passed: qcResult.value.passed.length,
+    failed: qcResult.value.failed.length
+  }
+})
+
+// 加载上次的 QC 结果
+const loadPreviousQCResult = async () => {
+  try {
+    const resolvedDir = resolvePath(config.local_dir)
+    const lerobotDir = `${resolvedDir}/lerobot`
+    const result = await loadQCResult(lerobotDir)
+
+    if (result.exists && (result.passed.length > 0 || result.failed.length > 0)) {
+      qcResult.value = {
+        passed: result.passed,
+        failed: result.failed
+      }
+      console.log('[loadPreviousQCResult] Loaded QC result:', result)
+      if (result.timestamp) {
+        const time = new Date(result.timestamp).toLocaleString()
+        ElMessage.info(`已加载上次质检结果 (${time}): ${result.passed.length} 通过, ${result.failed.length} 不通过`)
+      }
+    }
+  } catch (e) {
+    console.error('[loadPreviousQCResult] Failed to load QC result:', e)
   }
 }
 
@@ -165,6 +315,8 @@ onMounted(() => {
   taskStore.fetchTasks()
   taskStore.fetchStats()
   taskStore.startPolling(3000)
+  // Load previous QC result
+  setTimeout(loadPreviousQCResult, 600)
 })
 
 onUnmounted(() => {
@@ -187,7 +339,7 @@ onUnmounted(() => {
       <!-- Status Bar -->
       <div class="status-bar">
         <el-tooltip
-          v-for="(step, key) in { download: 'Download', convert: 'Convert', upload: 'Upload' }"
+          v-for="(step, key) in { download: 'BOS下载前检查', convert: '数据转换前检查', merged: '数据上传前检查' }"
           :key="key"
           :content="statusTooltips[key]"
           placement="top"
@@ -199,7 +351,7 @@ onUnmounted(() => {
               notready: status[key].ready === false,
               checking: status[key].ready === null
             }"
-            @click="runCheck(key as 'download' | 'convert' | 'upload')"
+            @click="runCheck(key as 'download' | 'convert' | 'merged')"
           >
             <div class="status-icon">
               <Icon v-if="status[key].ready === null" icon="mdi:loading" class="spin" />
@@ -240,7 +392,20 @@ onUnmounted(() => {
                   <Icon icon="mdi:calendar-clock" />
                   运行时解析为:
                 </span>
-                <code>{{ paths.raw_dir }}</code> → <code>{{ paths.lerobot_dir }}</code>
+                <div class="path-list">
+                  <div class="path-item">
+                    <span class="path-label">H5原始文件:</span>
+                    <code>{{ paths.raw_dir }}</code>
+                  </div>
+                  <div class="path-item">
+                    <span class="path-label">LeRobot转换后:</span>
+                    <code>{{ paths.lerobot_dir }}</code>
+                  </div>
+                  <div class="path-item">
+                    <span class="path-label">合并后数据集:</span>
+                    <code>{{ paths.merged_dir }}</code>
+                  </div>
+                </div>
               </div>
             </el-form-item>
           </el-col>
@@ -283,7 +448,27 @@ onUnmounted(() => {
           <el-button type="success" :loading="loading === 'convert'" :disabled="loading !== null" @click="handleRunStep('convert')" class="step-btn">
             <Icon icon="mdi:swap-horizontal" /> Convert
           </el-button>
-          <el-button type="warning" :loading="loading === 'upload'" :disabled="loading !== null" @click="handleRunStep('upload')" class="step-btn">
+          <el-button type="info" :loading="loading === 'qc'" :disabled="loading !== null" @click="openQCInspector" class="step-btn">
+            <Icon icon="mdi:check-decagram" /> QC
+            <el-badge v-if="qcStats" :value="qcStats.passed" type="success" class="qc-badge" />
+          </el-button>
+          <el-button
+            type="primary"
+            :loading="loading === 'merge'"
+            :disabled="loading !== null || !qcStats || qcStats.passed === 0"
+            @click="handleMerge"
+            class="step-btn merge-btn"
+          >
+            <Icon icon="mdi:merge" /> Merge
+            <span v-if="qcStats" class="merge-count">({{ qcStats.passed }})</span>
+          </el-button>
+          <el-button
+            type="warning"
+            :loading="loading === 'upload'"
+            :disabled="loading !== null || !status.merged.ready"
+            @click="handleUpload"
+            class="step-btn"
+          >
             <Icon icon="mdi:upload" /> Upload
           </el-button>
         </div>
@@ -293,12 +478,14 @@ onUnmounted(() => {
     <!-- Task Status Card -->
     <TaskPreviewBar />
 
-    <!-- Episode Selector Dialog -->
-    <EpisodeSelector
-      v-model="showEpisodeSelector"
-      :episodes="episodes"
-      :loading="scanningEpisodes"
-      @confirm="handleUploadConfirm"
+    <!-- QC Inspector Dialog -->
+    <QCInspector
+      v-model="showQCInspector"
+      :episodes="qcEpisodes"
+      :base-dir="`${resolvePath(config.local_dir)}/lerobot`"
+      :loading="qcLoading"
+      :initial-result="qcResult || undefined"
+      @confirm="handleQCConfirm"
     />
   </div>
 </template>
@@ -441,17 +628,33 @@ onUnmounted(() => {
 .derived-paths {
   font-size: 11px;
   color: var(--el-text-color-secondary);
-  margin-top: 4px;
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 4px;
+  margin-top: 6px;
 }
 
 .derived-paths code {
   background: var(--el-fill-color-light);
   padding: 1px 4px;
   border-radius: 3px;
+  font-size: 10px;
+}
+
+.path-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+}
+
+.path-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.path-label {
+  color: var(--el-text-color-regular);
+  font-weight: 500;
+  white-space: nowrap;
 }
 
 .template-hint {
@@ -484,6 +687,31 @@ onUnmounted(() => {
 
 .step-btn .iconify {
   margin-right: 6px;
+}
+
+/* QC Badge */
+.qc-badge {
+  margin-left: 6px;
+}
+
+/* Merge button */
+.merge-btn {
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  border: none;
+}
+
+.merge-btn:hover {
+  background: linear-gradient(135deg, #4f46e5, #7c3aed);
+}
+
+.merge-btn:disabled {
+  background: var(--el-button-disabled-bg-color);
+}
+
+.merge-count {
+  margin-left: 4px;
+  font-size: 12px;
+  opacity: 0.9;
 }
 
 /* Theme */

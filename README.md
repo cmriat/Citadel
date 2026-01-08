@@ -62,7 +62,34 @@ cd frontend && npm run dev
 | 下载管理 | 配置BOS路径，启动下载任务 |
 | 转换管理 | 扫描HDF5文件，批量转换 |
 | 上传管理 | 扫描LeRobot目录，上传到BOS |
+| **Pipeline** | 一站式流水线：下载 → 转换 → QC质检 → 合并 → 上传 |
 | 系统状态 | 查看系统健康状态和任务统计 |
+
+#### Pipeline 页面特性
+
+**一站式数据处理流水线**：
+```
+Download → Convert → QC 质检 → Merge → Upload
+                        ↓
+              视频播放器 → 标记通过/不通过
+                        ↓
+              只合并「通过」的 episode
+```
+
+**QC 质检功能**：
+- 三相机视频预览（环境、左腕、右腕）
+- 通过/不通过标记，支持批量操作
+- 质检结果自动保存和恢复
+- 支持断点续检（自动定位到上次进度）
+
+**快捷键**：
+| 按键 | 功能 |
+|------|------|
+| ↑/↓ 或 j/k | 导航 episode |
+| P / Enter | 标记通过 |
+| F / Backspace | 标记不通过 |
+| 空格 | 播放/暂停视频 |
+| 1/2/3 | 切换相机视角 |
 
 ### 方式二：命令行工具（CLI）
 
@@ -188,16 +215,20 @@ Citadel_release/
 │   │   ├── tasks.py          # 任务管理API
 │   │   ├── download.py       # 下载API
 │   │   ├── convert.py        # 转换API
-│   │   └── upload.py         # 上传API
+│   │   ├── upload.py         # 上传API（含QC结果、视频流）
+│   │   └── merge.py          # 合并API
 │   └── services/             # 业务服务
 │       ├── database.py       # SQLite数据库
 │       ├── download_service.py
 │       ├── convert_service.py
-│       └── upload_service.py
+│       ├── upload_service.py
+│       └── merge_service.py  # 合并服务
 ├── frontend/                 # Vue 3 前端
 │   ├── src/
 │   │   ├── views/            # 页面组件
+│   │   │   └── Pipeline.vue  # Pipeline流水线页面
 │   │   ├── components/       # 通用组件
+│   │   │   └── QCInspector.vue  # QC质检组件
 │   │   ├── api/              # API封装
 │   │   ├── stores/           # Pinia状态
 │   │   └── router/           # 路由配置
@@ -327,11 +358,16 @@ A: 转换脚本会在控制台输出详细进度，包括每帧的时间对齐�
 ## 开发路线
 
 - [x] **v0.1.0** - CLI工具版本（download + convert）
-- [x] **v0.2.0** - 完整数据处理流水线（当前）
+- [x] **v0.2.0** - 完整数据处理流水线
   - 后端API服务 + Web管理界面
   - 完整CLI工具链：download + convert + **merge** + upload
   - 数据集合并功能：支持多episode合并、维度自适应对齐
-- [ ] **v0.2.1** - UI/UX优化
+- [x] **v0.2.1** - Pipeline QC质检 + Merge 功能（当前）
+  - Pipeline 页面：一站式流水线操作
+  - QC 质检组件：三相机视频预览、通过/不通过标记
+  - QC 结果持久化：自动保存和恢复进度
+  - Merge 集成：仅合并通过质检的 episode
+  - 操作确认对话框：防止误操作
 - [ ] **v0.3.0** - 功能增强、日志监控
 
 ## 许可证
@@ -345,5 +381,5 @@ MIT License
 
 ---
 
-**版本**: v0.2.0
-**最后更新**: 2025-12-29
+**版本**: v0.2.1
+**最后更新**: 2026-01-07

@@ -16,6 +16,7 @@ class TaskType(str, Enum):
     DOWNLOAD = "download"
     CONVERT = "convert"
     UPLOAD = "upload"
+    MERGE = "merge"
 
 
 class TaskStatus(str, Enum):
@@ -54,6 +55,16 @@ class UploadConfig(BaseModel):
     include_videos: bool = Field(default=True, description="是否包含视频文件")
     delete_after: bool = Field(default=False, description="上传后是否删除本地文件")
     mc_path: str = Field(default="/home/jovyan/mc", description="mc可执行文件路径")
+
+
+class MergeConfig(BaseModel):
+    """合并任务配置"""
+    source_dirs: List[str] = Field(..., description="源 episode 目录列表")
+    output_dir: str = Field(..., description="输出合并数据集目录")
+    state_max_dim: int = Field(default=14, description="状态向量最大维度")
+    action_max_dim: int = Field(default=14, description="动作向量最大维度")
+    fps: int = Field(default=25, description="视频帧率")
+    copy_images: bool = Field(default=False, description="是否复制图像文件")
 
 
 class TaskProgress(BaseModel):
@@ -200,6 +211,16 @@ class CreateUploadTaskRequest(BaseModel):
     delete_after: bool = False
     mc_path: str = "/home/jovyan/mc"
     exclude_episodes: Optional[List[str]] = None  # 排除的 episode 名称列表
+
+
+class CreateMergeTaskRequest(BaseModel):
+    """创建合并任务请求"""
+    source_dirs: List[str]
+    output_dir: str
+    state_max_dim: int = 14
+    action_max_dim: int = 14
+    fps: int = 25
+    copy_images: bool = False
 
 
 class TaskResponse(BaseModel):

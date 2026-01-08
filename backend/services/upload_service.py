@@ -235,6 +235,36 @@ class UploadService:
             print(f"[UploadService] Failed to extract thumbnails: {e}")
             return []
 
+    def get_video_path(self, base_dir: str, episode_name: str, camera: str = "cam_env") -> Optional[str]:
+        """获取 episode 的指定相机视频路径
+
+        Args:
+            base_dir: LeRobot 数据目录（包含多个 episode 子目录）
+            episode_name: episode 名称，如 "episode_0001"
+            camera: 相机名称，默认 "cam_env"
+
+        Returns:
+            视频文件路径，如果不存在则返回 None
+        """
+        base_path = Path(base_dir)
+        episode_path = base_path / episode_name
+
+        if not episode_path.exists():
+            return None
+
+        # 查找视频文件
+        # 路径格式: videos/chunk-000/{camera_key}/episode_*.mp4
+        chunk_dir = episode_path / "videos" / "chunk-000"
+        if not chunk_dir.exists():
+            return None
+
+        for cam_dir in chunk_dir.iterdir():
+            if cam_dir.is_dir() and camera in cam_dir.name:
+                for video_file in cam_dir.glob("*.mp4"):
+                    return str(video_file)
+
+        return None
+
     def create_task(self, request: CreateUploadTaskRequest) -> Task:
         """创建上传任务"""
         task = Task(

@@ -149,34 +149,44 @@
 
 ---
 
-## 阶段2.7: Web前端 QC质检 + Merge集成 ⏳
+## 阶段2.7: Web前端 QC质检 + Merge集成 ✅
 
-**状态**: 待开始
+**状态**: 已完成
 **目标版本**: v0.2.1
-**预计时间**: 1-2天
+**完成日期**: 2026-01-07
+**实际耗时**: <1天
 
 ### 功能需求
 将现有的 CLI merge 工具集成到 Web 前端 Pipeline 页面，并新增 QC 质检功能。
 
-### 2.7.1 后端服务 - Merge API
-- [ ] 扩展 `backend/models/task.py` - 添加 MERGE 任务类型
-- [ ] 创建 `backend/services/merge_service.py` - Merge 服务
-- [ ] 创建 `backend/routers/merge.py` - Merge API 路由
-- [ ] 扩展 `backend/routers/upload.py` - 添加视频流端点
+### 2.7.1 后端服务 - Merge API ✅
+- [x] 扩展 `backend/models/task.py` - 添加 MERGE 任务类型
+- [x] 创建 `backend/services/merge_service.py` - Merge 服务
+- [x] 创建 `backend/routers/merge.py` - Merge API 路由
+- [x] 扩展 `backend/routers/upload.py` - 添加视频流端点
+- [x] 添加 QC 结果保存/加载 API
 
-### 2.7.2 前端组件 - QC质检
-- [ ] 创建 `QCInspector.vue` - 质检组件
+### 2.7.2 前端组件 - QC质检 ✅
+- [x] 创建 `QCInspector.vue` - 质检组件
   - 左侧: Episode 列表 (状态图标 + 点击选中)
   - 右侧: 视频播放器 (`<video>` 标签)
   - 底部: 通过/不通过按钮
   - 统计: 已通过/不通过/待检查数量
+- [x] 三相机切换支持 (环境/左腕/右腕)
+- [x] 键盘快捷键 (↑↓导航, P通过, F不通过, 1/2/3切换相机)
+- [x] QC 结果持久化 (保存到 qc_result.json)
+- [x] 恢复上次进度并自动定位
 
-### 2.7.3 Pipeline页面集成
-- [ ] 扩展 `frontend/src/api/pipeline.ts` - 添加 QC/Merge API
-- [ ] 修改 `frontend/src/views/Pipeline.vue`
-  - 添加 QC 按钮 (在 Convert 和 Upload 之间)
+### 2.7.3 Pipeline页面集成 ✅
+- [x] 扩展 `frontend/src/api/pipeline.ts` - 添加 QC/Merge API
+- [x] 修改 `frontend/src/views/Pipeline.vue`
+  - 添加 QC 按钮 (在 Convert 和 Merge 之间)
   - 添加 Merge 按钮 (显示通过数量)
+  - 添加 Upload 按钮 (上传 merged 目录)
   - 引入 QCInspector 组件
+- [x] 操作确认对话框 (Download/Convert/Merge/Upload)
+- [x] 状态检查栏 (BOS下载前/数据转换前/数据上传前)
+- [x] 路径说明 (H5原始文件/LeRobot转换后/合并后数据集)
 
 ### 工作流程
 ```
@@ -185,6 +195,15 @@ Download → Convert → QC 质检 → Merge → Upload
               视频播放器 → 标记通过/不通过
                         ↓
               只合并「通过」的 episode
+```
+
+### 目录结构
+```
+local_dir/
+  ├── raw/           # H5原始文件 (Download)
+  ├── lerobot/       # LeRobot转换后 (Convert)
+  ├── merged/        # 合并后数据集 (Merge)
+  └── qc_result.json # QC结果记录
 ```
 
 ---

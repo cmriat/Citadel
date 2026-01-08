@@ -80,8 +80,8 @@ def convert_single_file(
 
 
 def convert(
-    input_dir: str = "/home/jovyan/code/vla/temp_datas/1229_qz2/raw",
-    output_dir: str = "/home/jovyan/code/vla/temp_datas/1229_qz2/lerobot/",
+    input_dir: str = "/home/jovyan/code/vla/temp_datas/1225_qz2/raw",
+    output_dir: str = "/home/jovyan/code/vla/temp_datas/1225_qz2/lerobot/",
     robot_type: str = "airbot_play",
     fps: int = 25,
     task: str = "Fold the laundry",

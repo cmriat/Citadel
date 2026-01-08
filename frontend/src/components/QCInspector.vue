@@ -1,0 +1,718 @@
+<script setup lang="ts">
+/**
+ * QC 质检组件
+ *
+ * 用于在 Merge 前对 episode 进行质量检查，支持视频播放和标记通过/不通过
+ */
+
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { Icon } from '@iconify/vue'
+import { ElMessage } from 'element-plus'
+
+interface Episode {
+  name: string
+  path: string
+  frame_count: number
+  size: number
+  thumbnails: string[]
+}
+
+interface QCResult {
+  passed: string[]
+  failed: string[]
+}
+
+interface Props {
+  modelValue: boolean
+  episodes: Episode[]
+  baseDir: string
+  loading?: boolean
+  initialResult?: QCResult  // 上次保存的 QC 结果
+}
+
+const props = withDefaults(defineProps<Props>(), {
+  loading: false,
+  initialResult: undefined
+})
+
+const emit = defineEmits<{
+  (e: 'update:modelValue', value: boolean): void
+  (e: 'confirm', result: QCResult): void
+}>()
+
+const visible = computed({
+  get: () => props.modelValue,
+  set: (val) => emit('update:modelValue', val)
+})
+
+// QC 状态: 'passed' | 'failed' | 'pending'
+const qcStatus = ref<Record<string, 'passed' | 'failed' | 'pending'>>({})
+const currentEpisode = ref<string | null>(null)
+const videoRef = ref<HTMLVideoElement | null>(null)
+const hasShownResumeHint = ref(false)
+
+// 相机切换
+const cameras = [
+  { id: 'cam_env', label: '环境', icon: 'mdi:camera' },
+  { id: 'cam_left_wrist', label: '左腕', icon: 'mdi:hand-back-left' },
+  { id: 'cam_right_wrist', label: '右腕', icon: 'mdi:hand-back-right' }
+]
+const currentCamera = ref('cam_env')
+
+// 初始化 QC 状态
+watch(() => props.episodes, (eps) => {
+  const newStatus: Record<string, 'passed' | 'failed' | 'pending'> = {}
+  let resumeCount = 0
+
+  eps.forEach(ep => {
+    // 优先使用已有状态，其次使用 initialResult，最后默认 pending
+    if (qcStatus.value[ep.name]) {
+      newStatus[ep.name] = qcStatus.value[ep.name]
+    } else if (props.initialResult) {
+      if (props.initialResult.passed.includes(ep.name)) {
+        newStatus[ep.name] = 'passed'
+        resumeCount++
+      } else if (props.initialResult.failed.includes(ep.name)) {
+        newStatus[ep.name] = 'failed'
+        resumeCount++
+      } else {
+        newStatus[ep.name] = 'pending'
+      }
+    } else {
+      newStatus[ep.name] = 'pending'
+    }
+  })
+
+  qcStatus.value = newStatus
+
+  // 显示恢复提示并自动定位到第一个待检查的 episode
+  if (resumeCount > 0 && !hasShownResumeHint.value && eps.length > 0) {
+    hasShownResumeHint.value = true
+    const pendingEpisodes = eps.filter(ep => newStatus[ep.name] === 'pending')
+    const firstPending = pendingEpisodes[0]
+
+    if (firstPending) {
+      currentEpisode.value = firstPending.name
+      ElMessage.info({
+        message: `已恢复上次进度: ${resumeCount} 个已标记，从 ${firstPending.name} 继续`,
+        duration: 4000
+      })
+    } else {
+      // 所有都已标记，定位到第一个
+      currentEpisode.value = eps[0]?.name || null
+      ElMessage.success({
+        message: `所有 ${resumeCount} 个 episode 已标记完成`,
+        duration: 3000
+      })
+    }
+  }
+}, { immediate: true })
+
+// 统计
+const stats = computed(() => {
+  const values = Object.values(qcStatus.value)
+  return {
+    total: values.length,
+    passed: values.filter(v => v === 'passed').length,
+    failed: values.filter(v => v === 'failed').length,
+    pending: values.filter(v => v === 'pending').length
+  }
+})
+
+// 获取视频流 URL
+const getVideoUrl = (episodeName: string, camera?: string): string => {
+  const encodedBaseDir = encodeURIComponent(props.baseDir)
+  const encodedEpisode = encodeURIComponent(episodeName)
+  const cam = camera || currentCamera.value
+  return `/api/upload/video-stream?base_dir=${encodedBaseDir}&episode_name=${encodedEpisode}&camera=${cam}`
+}
+
+// 当前视频 key（用于强制刷新 video 元素）
+const videoKey = computed(() => `${currentEpisode.value}-${currentCamera.value}`)
+
+// 播放视频
+const playVideo = (episodeName: string) => {
+  currentEpisode.value = episodeName
+}
+
+// 标记通过
+const markPassed = (episodeName: string) => {
+  qcStatus.value[episodeName] = 'passed'
+  // 自动跳转到下一个待检查的 episode
+  autoNextPending()
+}
+
+// 标记不通过
+const markFailed = (episodeName: string) => {
+  qcStatus.value[episodeName] = 'failed'
+  // 自动跳转到下一个待检查的 episode
+  autoNextPending()
+}
+
+// 自动跳转到下一个待检查的
+const autoNextPending = () => {
+  const currentIdx = props.episodes.findIndex(e => e.name === currentEpisode.value)
+  // 从当前位置往后找
+  for (let i = currentIdx + 1; i < props.episodes.length; i++) {
+    if (qcStatus.value[props.episodes[i].name] === 'pending') {
+      currentEpisode.value = props.episodes[i].name
+      return
+    }
+  }
+  // 从头找
+  for (let i = 0; i < currentIdx; i++) {
+    if (qcStatus.value[props.episodes[i].name] === 'pending') {
+      currentEpisode.value = props.episodes[i].name
+      return
+    }
+  }
+}
+
+// 全部标记为通过
+const markAllPassed = () => {
+  Object.keys(qcStatus.value).forEach(k => {
+    qcStatus.value[k] = 'passed'
+  })
+  ElMessage.success(`已将 ${stats.value.total} 个 episode 标记为通过`)
+}
+
+// 重置所有状态
+const resetAll = () => {
+  Object.keys(qcStatus.value).forEach(k => {
+    qcStatus.value[k] = 'pending'
+  })
+  ElMessage.info('已重置所有状态')
+}
+
+// 确认并返回结果
+const handleConfirm = () => {
+  const result: QCResult = {
+    passed: Object.entries(qcStatus.value)
+      .filter(([_, s]) => s === 'passed')
+      .map(([n]) => n),
+    failed: Object.entries(qcStatus.value)
+      .filter(([_, s]) => s === 'failed')
+      .map(([n]) => n)
+  }
+  emit('confirm', result)
+  visible.value = false
+}
+
+// 获取 episode 对象
+const currentEpisodeData = computed(() => {
+  return props.episodes.find(e => e.name === currentEpisode.value)
+})
+
+// 格式化文件大小
+const formatSize = (bytes: number): string => {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+// 键盘快捷键
+const handleKeyDown = (e: KeyboardEvent) => {
+  if (!visible.value || !currentEpisode.value) return
+
+  switch (e.key) {
+    case 'ArrowUp':
+    case 'k':
+      e.preventDefault()
+      navigatePrev()
+      break
+    case 'ArrowDown':
+    case 'j':
+      e.preventDefault()
+      navigateNext()
+      break
+    case 'p':
+    case 'Enter':
+      e.preventDefault()
+      markPassed(currentEpisode.value)
+      break
+    case 'f':
+    case 'Backspace':
+      e.preventDefault()
+      markFailed(currentEpisode.value)
+      break
+    case ' ':
+      e.preventDefault()
+      toggleVideoPlay()
+      break
+    // 相机切换快捷键
+    case '1':
+      e.preventDefault()
+      currentCamera.value = 'cam_env'
+      break
+    case '2':
+      e.preventDefault()
+      currentCamera.value = 'cam_left_wrist'
+      break
+    case '3':
+      e.preventDefault()
+      currentCamera.value = 'cam_right_wrist'
+      break
+  }
+}
+
+const navigatePrev = () => {
+  const idx = props.episodes.findIndex(e => e.name === currentEpisode.value)
+  if (idx > 0) {
+    currentEpisode.value = props.episodes[idx - 1].name
+  }
+}
+
+const navigateNext = () => {
+  const idx = props.episodes.findIndex(e => e.name === currentEpisode.value)
+  if (idx < props.episodes.length - 1) {
+    currentEpisode.value = props.episodes[idx + 1].name
+  }
+}
+
+const toggleVideoPlay = () => {
+  if (videoRef.value) {
+    if (videoRef.value.paused) {
+      videoRef.value.play()
+    } else {
+      videoRef.value.pause()
+    }
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', handleKeyDown)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleKeyDown)
+})
+
+// 关闭时重置提示状态
+watch(visible, (val) => {
+  if (!val) {
+    hasShownResumeHint.value = false
+  }
+})
+</script>
+
+<template>
+  <el-dialog
+    v-model="visible"
+    title="QC 质检 - Episode 视频预览"
+    width="1100px"
+    :close-on-click-modal="false"
+    destroy-on-close
+  >
+    <div class="qc-container">
+      <!-- 左侧: Episode 列表 -->
+      <div class="episode-list">
+        <div class="list-header">
+          <span class="title">Episode 列表</span>
+          <div class="header-actions">
+            <el-button size="small" text @click="resetAll">
+              <Icon icon="mdi:refresh" />
+            </el-button>
+            <el-button size="small" type="success" @click="markAllPassed">
+              <Icon icon="mdi:check-all" /> 全部通过
+            </el-button>
+          </div>
+        </div>
+
+        <div class="episodes" v-loading="loading">
+          <div
+            v-for="ep in episodes"
+            :key="ep.name"
+            class="episode-item"
+            :class="{
+              active: currentEpisode === ep.name,
+              passed: qcStatus[ep.name] === 'passed',
+              failed: qcStatus[ep.name] === 'failed'
+            }"
+            @click="playVideo(ep.name)"
+          >
+            <div class="ep-thumbnail">
+              <img
+                v-if="ep.thumbnails?.[0]"
+                :src="ep.thumbnails[0]"
+                alt="thumbnail"
+              />
+              <Icon v-else icon="mdi:video-outline" class="placeholder-icon" />
+            </div>
+            <div class="ep-info">
+              <span class="ep-name">{{ ep.name }}</span>
+              <span class="ep-meta">{{ ep.frame_count }} 帧 · {{ formatSize(ep.size) }}</span>
+            </div>
+            <div class="ep-status">
+              <Icon
+                v-if="qcStatus[ep.name] === 'passed'"
+                icon="mdi:check-circle"
+                class="status-icon passed"
+              />
+              <Icon
+                v-else-if="qcStatus[ep.name] === 'failed'"
+                icon="mdi:close-circle"
+                class="status-icon failed"
+              />
+              <Icon
+                v-else
+                icon="mdi:help-circle-outline"
+                class="status-icon pending"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 右侧: 视频播放器 -->
+      <div class="video-panel">
+        <div v-if="!currentEpisode" class="no-selection">
+          <Icon icon="mdi:video-off-outline" class="big-icon" />
+          <span>点击左侧 Episode 播放视频</span>
+          <span class="hint">快捷键: ↑↓ 导航, P 通过, F 不通过, 空格 播放/暂停, 1/2/3 切换相机</span>
+        </div>
+
+        <template v-else>
+          <div class="video-header">
+            <div class="video-info">
+              <span class="video-title">{{ currentEpisode }}</span>
+              <span v-if="currentEpisodeData" class="video-meta">
+                {{ currentEpisodeData.frame_count }} 帧 · {{ formatSize(currentEpisodeData.size) }}
+              </span>
+            </div>
+            <!-- 相机切换 -->
+            <div class="camera-tabs">
+              <el-button-group>
+                <el-button
+                  v-for="cam in cameras"
+                  :key="cam.id"
+                  :type="currentCamera === cam.id ? 'primary' : 'default'"
+                  size="small"
+                  @click="currentCamera = cam.id"
+                >
+                  <Icon :icon="cam.icon" /> {{ cam.label }}
+                </el-button>
+              </el-button-group>
+            </div>
+          </div>
+
+          <video
+            ref="videoRef"
+            :key="videoKey"
+            :src="getVideoUrl(currentEpisode)"
+            controls
+            autoplay
+            class="video-player"
+          />
+
+          <div class="qc-actions">
+            <el-button
+              type="danger"
+              size="large"
+              @click="markFailed(currentEpisode)"
+              :class="{ active: qcStatus[currentEpisode] === 'failed' }"
+            >
+              <Icon icon="mdi:close" /> 不通过 (F)
+            </el-button>
+            <el-button
+              type="success"
+              size="large"
+              @click="markPassed(currentEpisode)"
+              :class="{ active: qcStatus[currentEpisode] === 'passed' }"
+            >
+              <Icon icon="mdi:check" /> 通过 (P)
+            </el-button>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <template #footer>
+      <div class="dialog-footer">
+        <div class="stats">
+          <span class="stat passed">
+            <Icon icon="mdi:check-circle" /> {{ stats.passed }} 通过
+          </span>
+          <span class="stat failed">
+            <Icon icon="mdi:close-circle" /> {{ stats.failed }} 不通过
+          </span>
+          <span class="stat pending">
+            <Icon icon="mdi:help-circle-outline" /> {{ stats.pending }} 待检查
+          </span>
+        </div>
+        <div class="actions">
+          <el-button @click="visible = false">取消</el-button>
+          <el-button
+            type="primary"
+            :disabled="stats.passed === 0"
+            @click="handleConfirm"
+          >
+            确认 ({{ stats.passed }} 个通过)
+          </el-button>
+        </div>
+      </div>
+    </template>
+  </el-dialog>
+</template>
+
+<style scoped>
+.qc-container {
+  display: flex;
+  gap: 20px;
+  height: 550px;
+}
+
+/* 左侧 Episode 列表 */
+.episode-list {
+  width: 320px;
+  border: 1px solid var(--el-border-color);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.list-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px;
+  border-bottom: 1px solid var(--el-border-color);
+  background: var(--el-fill-color-light);
+}
+
+.list-header .title {
+  font-weight: 600;
+}
+
+.header-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.episodes {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.episode-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+  transition: all 0.2s;
+}
+
+.episode-item:hover {
+  background: var(--el-fill-color-light);
+}
+
+.episode-item.active {
+  background: var(--el-color-primary-light-9);
+  border-left: 3px solid var(--el-color-primary);
+}
+
+.episode-item.passed {
+  background: rgba(103, 194, 58, 0.08);
+}
+
+.episode-item.failed {
+  background: rgba(245, 108, 108, 0.08);
+}
+
+.ep-thumbnail {
+  width: 48px;
+  height: 36px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--el-fill-color-dark);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.ep-thumbnail img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.placeholder-icon {
+  font-size: 20px;
+  color: var(--el-text-color-secondary);
+}
+
+.ep-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.ep-name {
+  font-weight: 500;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ep-meta {
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+}
+
+.ep-status {
+  flex-shrink: 0;
+}
+
+.status-icon {
+  font-size: 20px;
+}
+
+.status-icon.passed {
+  color: #67c23a;
+}
+
+.status-icon.failed {
+  color: #f56c6c;
+}
+
+.status-icon.pending {
+  color: #909399;
+}
+
+/* 右侧视频面板 */
+.video-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--el-border-color);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.no-selection {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--el-text-color-secondary);
+  gap: 12px;
+}
+
+.big-icon {
+  font-size: 64px;
+  opacity: 0.5;
+}
+
+.hint {
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.video-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: var(--el-fill-color-light);
+  border-bottom: 1px solid var(--el-border-color);
+}
+
+.video-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.video-title {
+  font-weight: 600;
+}
+
+.video-meta {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.camera-tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.camera-tabs .el-button {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.camera-tabs .iconify {
+  font-size: 14px;
+}
+
+.video-player {
+  flex: 1;
+  width: 100%;
+  background: #000;
+  min-height: 0;
+}
+
+.qc-actions {
+  display: flex;
+  justify-content: center;
+  gap: 24px;
+  padding: 16px;
+  background: var(--el-fill-color-light);
+  border-top: 1px solid var(--el-border-color);
+}
+
+.qc-actions .el-button {
+  width: 140px;
+  height: 44px;
+  font-size: 15px;
+}
+
+.qc-actions .el-button.active {
+  box-shadow: 0 0 0 3px var(--el-color-primary-light-5);
+}
+
+/* Footer */
+.dialog-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+}
+
+.stats {
+  display: flex;
+  gap: 20px;
+}
+
+.stat {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+}
+
+.stat.passed {
+  color: #67c23a;
+}
+
+.stat.failed {
+  color: #f56c6c;
+}
+
+.stat.pending {
+  color: #909399;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+}
+</style>
