@@ -92,7 +92,7 @@ export const runStep = (step: 'download' | 'convert' | 'upload', config: Pipelin
       })
     case 'upload':
       return api.post('/upload/start', {
-        local_dir: paths.lerobot_dir,
+        local_dir: paths.merged_dir,
         bos_path: config.bos_target,
         concurrency: config.concurrency,
         include_videos: true
@@ -154,9 +154,9 @@ export const checkUploadReady = async (localDir: string): Promise<CheckResult> =
     })
     // merged 目录本身就是一个数据集，检查是否有 meta 目录
     return {
-      ready: dirs.length > 0 || true,  // merged 目录存在即可
-      count: 1,
-      message: 'merged ready'
+      ready: dirs.length > 0,
+      count: dirs.length,
+      message: dirs.length > 0 ? 'Upload ready' : 'No merged data'
     }
   } catch (e) {
     return { ready: false, count: 0, message: (e as Error).message }

@@ -7,6 +7,7 @@ FastAPI应用入口，提供任务管理、下载和转换API。
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from backend.config import settings
 from backend.routers import tasks, download, convert, upload, validation, merge
 
 # 创建FastAPI应用
@@ -18,10 +19,10 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
-# 配置CORS（允许前端跨域访问）
+# 配置CORS（从统一配置读取）
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 生产环境应该限制具体域名
+    allow_origins=settings.get_cors_origins_list(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -83,6 +84,21 @@ async def health():
     }
 
 
+@app.get("/api/config/defaults")
+async def get_defaults():
+    """获取前端所需的默认配置值"""
+    return {
+        "bos_alias": settings.BOS_ALIAS,
+        "bos_default_prefix": settings.BOS_DEFAULT_PREFIX,
+        "default_task_name": settings.DEFAULT_TASK_NAME,
+        "default_robot_type": settings.DEFAULT_ROBOT_TYPE,
+        "default_fps": settings.DEFAULT_FPS,
+        "default_concurrency": settings.DEFAULT_CONCURRENCY,
+        "default_file_pattern": settings.DEFAULT_FILE_PATTERN,
+        "default_parallel_jobs": settings.DEFAULT_PARALLEL_JOBS,
+    }
+
+
 @app.get("/api/stats")
 async def stats():
     """系统统计"""
@@ -131,4 +147,4 @@ async def startup():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host=settings.API_HOST, port=settings.API_PORT)

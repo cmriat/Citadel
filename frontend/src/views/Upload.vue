@@ -16,11 +16,14 @@ const scannedDirs = ref<UploadableDir[]>([])
 // 配置记忆功能
 const STORAGE_KEY = 'citadel_upload_config'
 
+// 从环境变量读取默认配置
+const DEFAULT_CONCURRENCY = parseInt(import.meta.env.VITE_DEFAULT_CONCURRENCY || '10')
+
 // 默认配置
 const defaultConfig: UploadConfig = {
   local_dir: './data/lerobot',
-  bos_path: 'bos:/citadel-bos/lerobot_output/',
-  concurrency: 10,
+  bos_path: '',  // 用户必须提供
+  concurrency: DEFAULT_CONCURRENCY,
   include_videos: true,
   delete_after: false
 }

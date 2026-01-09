@@ -11,11 +11,25 @@ import time
 from typing import Callable, Optional, Tuple
 from pathlib import Path
 
+from backend.config import settings
+
 
 class MCExecutor:
     """mc命令执行器，带进度回调"""
 
-    def __init__(self, mc_path: str = "/home/jovyan/mc"):
+    def __init__(self, mc_path: str = None):
+        # 自动检测 mc 路径：环境变量 > ~/bin/mc > 系统 PATH
+        if mc_path is None:
+            import os
+            import shutil
+            mc_path = os.environ.get("MC_PATH")
+            if not mc_path:
+                home_mc = Path.home() / "bin" / "mc"
+                if home_mc.exists():
+                    mc_path = str(home_mc)
+                else:
+                    mc_path = shutil.which("mc") or "mc"
+
         self.mc_path = Path(mc_path)
 
         if not self.mc_path.exists():
@@ -138,12 +152,13 @@ class MCExecutor:
             (是否连接成功, 错误信息)
         """
         try:
-            cmd = [str(self.mc_path), "ls", "bos/srgdata/"]
+            test_path = f"{settings.BOS_ALIAS}/{settings.BOS_TEST_PATH}"
+            cmd = [str(self.mc_path), "ls", test_path]
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=10
+                timeout=settings.TIMEOUT_MC_CHECK
             )
 
             if result.returncode == 0:

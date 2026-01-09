@@ -77,6 +77,15 @@ async def scan_files(
 
     用于在创建转换任务前预览将要转换的文件列表。
     """
+    from pathlib import Path
+
+    # 验证输入目录
+    input_path = Path(input_dir)
+    if not input_path.exists():
+        raise HTTPException(status_code=400, detail=f"目录不存在: {input_dir}")
+    if not input_path.is_dir():
+        raise HTTPException(status_code=400, detail=f"路径不是目录: {input_dir}")
+
     service = get_convert_service()
     files = service.scan_files(input_dir, file_pattern)
 

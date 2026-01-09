@@ -9,11 +9,13 @@ import asyncio
 import subprocess
 import re
 import time
+import os
 from pathlib import Path
 from typing import Optional, Callable, Tuple
 from datetime import datetime
 import threading
 
+from backend.config import settings
 from backend.models.task import (
     Task, TaskType, TaskStatus, TaskResult,
     CreateDownloadTaskRequest
@@ -24,7 +26,11 @@ from backend.services.database import get_database
 class DownloadService:
     """下载服务"""
 
-    def __init__(self, mc_path: str = "/home/jovyan/mc"):
+    def __init__(self, mc_path: str = None):
+        # 使用统一配置获取 mc 路径
+        if mc_path is None:
+            mc_path = settings.get_mc_path()
+
         self.mc_path = Path(mc_path)
         self._running_tasks: dict[str, threading.Thread] = {}
         self._cancel_flags: dict[str, bool] = {}
@@ -39,7 +45,7 @@ class DownloadService:
                 [str(self.mc_path), "--version"],
                 capture_output=True,
                 text=True,
-                timeout=10
+                timeout=settings.TIMEOUT_MC_CHECK
             )
             if result.returncode == 0:
                 return True, result.stdout.strip()
@@ -50,11 +56,13 @@ class DownloadService:
     def check_connection(self) -> Tuple[bool, str]:
         """检查BOS连接"""
         try:
+            # 使用统一配置的 BOS 测试路径
+            test_path = f"{settings.BOS_ALIAS}/{settings.BOS_TEST_PATH}"
             result = subprocess.run(
-                [str(self.mc_path), "ls", "bos/srgdata/"],
+                [str(self.mc_path), "ls", test_path],
                 capture_output=True,
                 text=True,
-                timeout=10
+                timeout=settings.TIMEOUT_MC_CHECK
             )
             if result.returncode == 0:
                 return True, ""
@@ -87,10 +95,10 @@ class DownloadService:
 
             # 执行 mc ls 命令
             result = subprocess.run(
-                [str(self.mc_path), "ls", f"bos/{bos_path}/"],
+                [str(self.mc_path), "ls", f"{settings.BOS_ALIAS}/{bos_path}/"],
                 capture_output=True,
                 text=True,
-                timeout=30
+                timeout=settings.TIMEOUT_BOS_SCAN
             )
 
             if result.returncode != 0:
@@ -219,8 +227,8 @@ class DownloadService:
 
             # 构建mc命令
             mc_path = config.get('mc_path', str(self.mc_path))
-            source = f"bos/{config['bos_path']}"
-            concurrency = config.get('concurrency', 10)
+            source = f"{settings.BOS_ALIAS}/{config['bos_path']}"
+            concurrency = config.get('concurrency', settings.DEFAULT_CONCURRENCY)
 
             cmd = [
                 mc_path,

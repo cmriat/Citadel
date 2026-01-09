@@ -10,6 +10,8 @@ from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, Field
 import uuid
 
+from backend.config import settings
+
 
 class TaskType(str, Enum):
     """任务类型"""
@@ -32,38 +34,39 @@ class DownloadConfig(BaseModel):
     """下载任务配置"""
     bos_path: str = Field(..., description="BOS远程路径")
     local_path: str = Field(..., description="本地保存路径")
-    concurrency: int = Field(default=10, description="并发下载数")
-    mc_path: str = Field(default="/home/jovyan/mc", description="mc可执行文件路径")
+    concurrency: int = Field(default_factory=lambda: settings.DEFAULT_CONCURRENCY, description="并发下载数")
+    mc_path: str = Field(default="mc", description="mc可执行文件路径")
 
 
 class ConvertConfig(BaseModel):
     """转换任务配置"""
     input_dir: str = Field(..., description="输入HDF5目录")
     output_dir: str = Field(..., description="输出LeRobot目录")
-    robot_type: str = Field(default="airbot_play", description="机器人类型")
-    fps: int = Field(default=25, description="视频帧率")
-    task: str = Field(default="Fold the laundry", description="任务描述")
-    parallel_jobs: int = Field(default=4, description="并发转换数")
-    file_pattern: str = Field(default="episode_*.h5", description="文件匹配模式")
+    robot_type: str = Field(default_factory=lambda: settings.DEFAULT_ROBOT_TYPE, description="机器人类型")
+    fps: int = Field(default_factory=lambda: settings.DEFAULT_FPS, description="视频帧率")
+    task: str = Field(default_factory=lambda: settings.DEFAULT_TASK_NAME, description="任务描述")
+    parallel_jobs: int = Field(default_factory=lambda: settings.DEFAULT_PARALLEL_JOBS, description="并发转换数")
+    file_pattern: str = Field(default_factory=lambda: settings.DEFAULT_FILE_PATTERN, description="文件匹配模式")
 
 
 class UploadConfig(BaseModel):
     """上传任务配置"""
     local_dir: str = Field(..., description="本地LeRobot目录")
     bos_path: str = Field(..., description="BOS目标路径")
-    concurrency: int = Field(default=10, description="并发上传数")
+    concurrency: int = Field(default_factory=lambda: settings.DEFAULT_CONCURRENCY, description="并发上传数")
     include_videos: bool = Field(default=True, description="是否包含视频文件")
     delete_after: bool = Field(default=False, description="上传后是否删除本地文件")
-    mc_path: str = Field(default="/home/jovyan/mc", description="mc可执行文件路径")
+    mc_path: str = Field(default="mc", description="mc可执行文件路径")
+    exclude_episodes: Optional[List[str]] = Field(default=None, description="要排除的 episode 列表")
 
 
 class MergeConfig(BaseModel):
     """合并任务配置"""
     source_dirs: List[str] = Field(..., description="源 episode 目录列表")
     output_dir: str = Field(..., description="输出合并数据集目录")
-    state_max_dim: int = Field(default=14, description="状态向量最大维度")
-    action_max_dim: int = Field(default=14, description="动作向量最大维度")
-    fps: int = Field(default=25, description="视频帧率")
+    state_max_dim: int = Field(default_factory=lambda: settings.STATE_MAX_DIM, description="状态向量最大维度")
+    action_max_dim: int = Field(default_factory=lambda: settings.ACTION_MAX_DIM, description="动作向量最大维度")
+    fps: int = Field(default_factory=lambda: settings.DEFAULT_FPS, description="视频帧率")
     copy_images: bool = Field(default=False, description="是否复制图像文件")
 
 
@@ -187,29 +190,29 @@ class CreateDownloadTaskRequest(BaseModel):
     """创建下载任务请求"""
     bos_path: str
     local_path: str
-    concurrency: int = 10
-    mc_path: str = "/home/jovyan/mc"
+    concurrency: int = Field(default_factory=lambda: settings.DEFAULT_CONCURRENCY)
+    mc_path: str = "mc"
 
 
 class CreateConvertTaskRequest(BaseModel):
     """创建转换任务请求"""
     input_dir: str
     output_dir: str
-    robot_type: str = "airbot_play"
-    fps: int = 25
-    task: str = "Fold the laundry"
-    parallel_jobs: int = 4
-    file_pattern: str = "episode_*.h5"
+    robot_type: str = Field(default_factory=lambda: settings.DEFAULT_ROBOT_TYPE)
+    fps: int = Field(default_factory=lambda: settings.DEFAULT_FPS)
+    task: str = Field(default_factory=lambda: settings.DEFAULT_TASK_NAME)
+    parallel_jobs: int = Field(default_factory=lambda: settings.DEFAULT_PARALLEL_JOBS)
+    file_pattern: str = Field(default_factory=lambda: settings.DEFAULT_FILE_PATTERN)
 
 
 class CreateUploadTaskRequest(BaseModel):
     """创建上传任务请求"""
     local_dir: str
     bos_path: str
-    concurrency: int = 10
+    concurrency: int = Field(default_factory=lambda: settings.DEFAULT_CONCURRENCY)
     include_videos: bool = True
     delete_after: bool = False
-    mc_path: str = "/home/jovyan/mc"
+    mc_path: str = "mc"
     exclude_episodes: Optional[List[str]] = None  # 排除的 episode 名称列表
 
 
@@ -217,9 +220,9 @@ class CreateMergeTaskRequest(BaseModel):
     """创建合并任务请求"""
     source_dirs: List[str]
     output_dir: str
-    state_max_dim: int = 14
-    action_max_dim: int = 14
-    fps: int = 25
+    state_max_dim: int = Field(default_factory=lambda: settings.STATE_MAX_DIM)
+    action_max_dim: int = Field(default_factory=lambda: settings.ACTION_MAX_DIM)
+    fps: int = Field(default_factory=lambda: settings.DEFAULT_FPS)
     copy_images: bool = False
 
 

@@ -4,6 +4,7 @@ import { Icon } from '@iconify/vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useThemeStore } from '@/stores/theme'
 import { useTaskStore } from '@/stores/tasks'
+import { getDefaults, type DefaultConfig } from '@/api'
 import {
   runStep, derivePaths, hasPathTemplate, resolvePath,
   checkDownloadReady, checkConvertReady, checkMergedReady,
@@ -14,28 +15,51 @@ import type { PipelineConfig, CheckResult, Episode, QCResult, MergeConfig, QCRes
 import ValidatedInput from '@/components/ValidatedInput.vue'
 import TaskPreviewBar from '@/components/TaskPreviewBar.vue'
 import QCInspector from '@/components/QCInspector.vue'
+import MergeEpisodeSelector from '@/components/MergeEpisodeSelector.vue'
 
 const themeStore = useThemeStore()
 const taskStore = useTaskStore()
 const STORAGE_KEY = 'citadel_pipeline_config'
 
-const defaultConfig: PipelineConfig = {
-  bos_source: 'bos:/citadel-bos/online_test_hdf5_v1/',
-  bos_target: 'bos:/citadel-bos/lerobot_output/',
+// 后端配置（启动时获取）
+const backendDefaults = ref<DefaultConfig | null>(null)
+
+// 本地回退默认值（后端不可用时使用）
+const fallbackConfig: PipelineConfig = {
+  bos_source: '',
+  bos_target: '',
   local_dir: './data',
-  robot_type: 'citadel',
-  fps: 30,
+  robot_type: 'airbot_play',
+  fps: 25,
   concurrency: 10,
   file_pattern: 'episode_*.h5',
   task_name: 'default_task'
 }
 
+// 获取当前默认配置（优先使用后端配置）
+const getDefaultConfig = (): PipelineConfig => {
+  if (backendDefaults.value) {
+    return {
+      bos_source: '',  // 用户必须提供
+      bos_target: '',  // 用户必须提供
+      local_dir: './data',
+      robot_type: backendDefaults.value.default_robot_type,
+      fps: backendDefaults.value.default_fps,
+      concurrency: backendDefaults.value.default_concurrency,
+      file_pattern: backendDefaults.value.default_file_pattern,
+      task_name: backendDefaults.value.default_task_name
+    }
+  }
+  return { ...fallbackConfig }
+}
+
 const loadConfig = (): PipelineConfig => {
+  const defaults = getDefaultConfig()
   try {
     const saved = localStorage.getItem(STORAGE_KEY)
-    if (saved) return { ...defaultConfig, ...JSON.parse(saved) }
+    if (saved) return { ...defaults, ...JSON.parse(saved) }
   } catch (e) { console.error('[Pipeline] Failed to load config:', e) }
-  return { ...defaultConfig }
+  return { ...defaults }
 }
 
 const saveConfig = (config: PipelineConfig) => {
@@ -53,6 +77,11 @@ const qcEpisodes = ref<Episode[]>([])
 const qcLoading = ref(false)
 const qcResult = ref<QCResult | null>(null)
 const mergeTaskId = ref<string | null>(null)
+
+// Merge episode selection
+const showMergeSelector = ref(false)
+const mergeEpisodes = ref<Episode[]>([])
+const mergeSelectorLoading = ref(false)
 
 // ============ Status Check ============
 interface StepStatus {
@@ -75,8 +104,10 @@ const statusTooltips: Record<string, string> = {
 
 const checking = ref<'download' | 'convert' | 'merged' | 'all' | null>(null)
 
-const runCheck = async (step: 'download' | 'convert' | 'merged') => {
-  checking.value = step
+const runCheck = async (step: 'download' | 'convert' | 'merged', skipCheckingState = false) => {
+  if (!skipCheckingState) {
+    checking.value = step
+  }
   status[step] = { ready: null, count: 0, message: 'Checking...' }
 
   // 解析日期模板，确保状态检查使用正确的路径
@@ -96,15 +127,17 @@ const runCheck = async (step: 'download' | 'convert' | 'merged') => {
   }
 
   status[step] = result
-  checking.value = null
+  if (!skipCheckingState) {
+    checking.value = null
+  }
 }
 
 const runAllChecks = async () => {
   checking.value = 'all'
   await Promise.all([
-    runCheck('download'),
-    runCheck('convert'),
-    runCheck('merged')
+    runCheck('download', true),
+    runCheck('convert', true),
+    runCheck('merged', true)
   ])
   checking.value = null
 }
@@ -220,6 +253,7 @@ const handleQCConfirm = async (result: QCResult) => {
     console.log('[handleQCConfirm] QC result saved to file')
   } catch (e) {
     console.error('[handleQCConfirm] Failed to save QC result:', e)
+    ElMessage.warning(`质检结果保存失败: ${(e as Error).message}`)
   }
 }
 
@@ -230,20 +264,43 @@ const handleMerge = async () => {
     return
   }
 
-  // 弹出确认对话框
+  // 打开 merge 选择器，显示通过质检的 episode
+  mergeSelectorLoading.value = true
+  showMergeSelector.value = true
+
   try {
-    await ElMessageBox.confirm(
-      confirmMessages.merge.message(config, qcResult.value.passed.length),
-      confirmMessages.merge.title,
-      {
-        confirmButtonText: '开始合并',
-        cancelButtonText: '取消',
-        type: 'info',
-        customStyle: { whiteSpace: 'pre-line' }
-      }
-    )
-  } catch {
-    return // 用户取消
+    const resolvedDir = resolvePath(config.local_dir)
+
+    // 扫描所有 episode（scanEpisodes 内部会自动拼接 /lerobot）
+    console.log('[handleMerge] resolvedDir:', resolvedDir)
+    console.log('[handleMerge] qcResult.passed:', qcResult.value.passed)
+    const episodes = await scanEpisodes(resolvedDir)
+    console.log('[handleMerge] scanned episodes:', episodes.map(ep => ep.name))
+
+    // 只显示通过质检的 episode
+    mergeEpisodes.value = episodes.filter(ep => {
+      const included = qcResult.value?.passed?.includes(ep.name) ?? false
+      console.log(`[handleMerge] episode ${ep.name}: ${included ? 'included' : 'excluded'}`)
+      return included
+    })
+    console.log('[handleMerge] filtered episodes:', mergeEpisodes.value.map(ep => ep.name))
+
+    if (mergeEpisodes.value.length === 0) {
+      ElMessage.warning('扫描到的 episode 与质检结果不匹配，请检查数据')
+      showMergeSelector.value = false
+    }
+  } catch (e) {
+    ElMessage.error(`扫描 episode 失败: ${(e as Error).message}`)
+    showMergeSelector.value = false
+  } finally {
+    mergeSelectorLoading.value = false
+  }
+}
+
+const handleMergeConfirm = async (selectedEpisodes: string[]) => {
+  if (selectedEpisodes.length === 0) {
+    ElMessage.warning('请至少选择一个 episode 进行合并')
+    return
   }
 
   loading.value = 'merge'
@@ -251,19 +308,18 @@ const handleMerge = async () => {
     const resolvedDir = resolvePath(config.local_dir)
     const lerobotDir = `${resolvedDir}/lerobot`
 
-    // 构建 merge 配置：将通过的 episode 合并
-    // output_dir 与 raw/lerobot 同级
+    // 构建 merge 配置：将选中的 episode 合并
     const mergeConfig: MergeConfig = {
-      source_dirs: qcResult.value.passed.map(ep => `${lerobotDir}/${ep}`),
+      source_dirs: selectedEpisodes.map(ep => `${lerobotDir}/${ep}`),
       output_dir: `${resolvedDir}/merged`,
       fps: config.fps,
       copy_images: false
     }
 
-    console.log('[handleMerge] mergeConfig:', mergeConfig)
+    console.log('[handleMergeConfirm] mergeConfig:', mergeConfig)
     const task = await runMerge(mergeConfig)
     mergeTaskId.value = task.id
-    ElMessage.success(`Merge 任务已启动: ${task.id}`)
+    ElMessage.success(`Merge 任务已启动: ${task.id} (合并 ${selectedEpisodes.length} 个 episode)`)
     saveConfig(config)
 
     // 更新任务列表
@@ -308,14 +364,31 @@ const loadPreviousQCResult = async () => {
 }
 
 // Auto-check on mount and start task polling
-onMounted(() => {
-  // Delay to allow backend to be ready
+onMounted(async () => {
+  // 1. 先获取后端默认配置
+  try {
+    backendDefaults.value = await getDefaults()
+    console.log('[Pipeline] Loaded backend defaults:', backendDefaults.value)
+    // 如果当前配置是空的，用后端默认值更新
+    const defaults = getDefaultConfig()
+    if (!config.task_name || config.task_name === 'default_task') {
+      config.task_name = defaults.task_name
+    }
+    if (!config.robot_type) config.robot_type = defaults.robot_type
+    if (!config.fps) config.fps = defaults.fps
+    if (!config.concurrency) config.concurrency = defaults.concurrency
+    if (!config.file_pattern) config.file_pattern = defaults.file_pattern
+  } catch (e) {
+    console.warn('[Pipeline] Failed to load backend defaults, using fallback:', e)
+  }
+
+  // 2. Delay to allow backend to be ready
   setTimeout(runAllChecks, 500)
-  // Start polling for task updates (for preview bar)
+  // 3. Start polling for task updates (for preview bar)
   taskStore.fetchTasks()
   taskStore.fetchStats()
   taskStore.startPolling(3000)
-  // Load previous QC result
+  // 4. Load previous QC result
   setTimeout(loadPreviousQCResult, 600)
 })
 
@@ -448,7 +521,7 @@ onUnmounted(() => {
           <el-button type="success" :loading="loading === 'convert'" :disabled="loading !== null" @click="handleRunStep('convert')" class="step-btn">
             <Icon icon="mdi:swap-horizontal" /> Convert
           </el-button>
-          <el-button type="info" :loading="loading === 'qc'" :disabled="loading !== null" @click="openQCInspector" class="step-btn">
+          <el-button type="info" :loading="qcLoading" :disabled="loading !== null || qcLoading" @click="openQCInspector" class="step-btn">
             <Icon icon="mdi:check-decagram" /> QC
             <el-badge v-if="qcStats" :value="qcStats.passed" type="success" class="qc-badge" />
           </el-button>
@@ -486,6 +559,15 @@ onUnmounted(() => {
       :loading="qcLoading"
       :initial-result="qcResult || undefined"
       @confirm="handleQCConfirm"
+    />
+
+    <!-- Merge Episode Selector -->
+    <MergeEpisodeSelector
+      v-model="showMergeSelector"
+      :episodes="mergeEpisodes"
+      :base-dir="`${resolvePath(config.local_dir)}/lerobot`"
+      :loading="mergeSelectorLoading"
+      @confirm="handleMergeConfirm"
     />
   </div>
 </template>

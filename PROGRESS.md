@@ -1,11 +1,11 @@
-# Citadel_release 开发进度
+# Citadel 开发进度
 
 ## 项目信息
 
 - **开始日期**: 2025-12-26
-- **当前版本**: v0.2.0
-- **项目状态**: ✅ v0.2.0 已发布
-- **当前分支**: feature/backend-api
+- **当前版本**: v0.2.3
+- **项目状态**: ✅ v0.2.3 已发布
+- **当前分支**: main
 
 ---
 
@@ -39,11 +39,11 @@
 - ✅ ~~convert.py脚本与BOS数据格式不匹配~~ (已解决)
 
 **关键文件**:
-- ✅ `/data/maozan/code/Citadel_release/pixi.toml`
-- ✅ `/data/maozan/code/Citadel_release/scripts/download.sh`
-- ✅ `/data/maozan/code/Citadel_release/scripts/convert.py` (已适配v1格式)
-- ✅ `/data/maozan/code/Citadel_release/cli/download_cli.py`
-- ✅ `/data/maozan/code/Citadel_release/cli/convert_cli.py`
+- ✅ `pixi.toml`
+- ✅ `scripts/download.sh`
+- ✅ `scripts/convert.py` (已适配v1格式)
+- ✅ `cli/download_cli.py`
+- ✅ `cli/convert_cli.py`
 
 ---
 
@@ -208,6 +208,128 @@ local_dir/
 
 ---
 
+## 阶段2.8: 配置重构 - 统一配置管理 ✅
+
+**状态**: 已完成
+**目标版本**: v0.2.2
+**完成日期**: 2026-01-09
+**实际耗时**: <0.5天
+
+### 问题背景
+- 项目中存在大量硬编码路径（如 `/home/maozan/mc`）
+- 魔法数字分散在各个文件中（端口、超时、默认值）
+- 不同文件中相同参数使用不同默认值（如 state_max_dim: 14 vs 32）
+- 新环境部署需要手动修改多处代码
+
+### 2.8.1 后端配置模块 ✅
+- [x] 创建 `backend/config/__init__.py` - 配置模块入口
+- [x] 创建 `backend/config/settings.py` - 统一配置管理类
+  - 使用 `@property` 实现懒加载
+  - 支持环境变量覆盖默认值
+  - mc路径智能检测（MC_PATH → ~/bin/mc → PATH）
+- [x] 创建 `.env.example` - 环境变量模板文件
+
+### 2.8.2 后端服务重构 ✅
+- [x] 重构 `backend/models/task.py` - 使用配置模块默认值
+- [x] 重构 `backend/main.py` - 端口和CORS配置
+- [x] 重构 `backend/services/database.py` - 数据库路径配置
+- [x] 重构 `backend/services/download_service.py` - mc路径和超时配置
+- [x] 重构 `backend/services/upload_service.py` - mc路径和BOS配置
+- [x] 重构 `backend/services/convert_service.py` - 超时和默认参数配置
+- [x] 重构 `backend/services/merge_service.py` - 维度和fps默认值配置
+
+### 2.8.3 CLI工具重构 ✅
+- [x] 重构 `cli/download_cli.py` - 移除硬编码路径，改为必填参数
+- [x] 重构 `cli/convert_cli.py` - 使用环境变量默认值
+- [x] 重构 `cli/upload_cli.py` - 移除硬编码路径，改为必填参数
+
+### 2.8.4 前端配置重构 ✅
+- [x] 重构 `frontend/vite.config.ts` - 支持环境变量配置端口
+- [x] 重构 `frontend/src/api/index.ts` - API超时配置
+- [x] 重构 `frontend/src/views/Pipeline.vue` - 默认并发数配置
+- [x] 重构 `frontend/src/views/Download.vue` - 默认并发数配置
+- [x] 重构 `frontend/src/views/Upload.vue` - 默认并发数配置
+- [x] 创建 `frontend/.env.example` - 前端环境变量模板
+
+### 2.8.5 文档更新 ✅
+- [x] 更新 `README.md` - 添加配置说明章节
+- [x] 更新 `USER_GUIDE.md` - 添加环境变量配置章节
+- [x] 更新 `PROGRESS.md` - 添加配置重构里程碑
+- [x] 创建 `INSTALL.md` - 完整环境安装指南
+
+### 配置项汇总
+
+**后端配置项（19项）：**
+- API服务器：`API_HOST`, `API_PORT`, `CORS_ORIGINS`
+- mc工具：`MC_PATH`, `BOS_ALIAS`, `BOS_TEST_PATH`
+- 默认参数：`DEFAULT_CONCURRENCY`, `DEFAULT_FPS`, `DEFAULT_ROBOT_TYPE`, `DEFAULT_TASK_NAME`, `DEFAULT_PARALLEL_JOBS`, `STATE_MAX_DIM`, `ACTION_MAX_DIM`
+- 超时设置：`TIMEOUT_MC_CHECK`, `TIMEOUT_CONVERT_FILE`
+- 存储路径：`DB_PATH`
+
+**前端配置项（4项）：**
+- `VITE_API_PORT`, `VITE_DEV_PORT`, `VITE_DEFAULT_CONCURRENCY`, `VITE_API_TIMEOUT`
+
+---
+
+## 阶段2.9: Bug修复与QC优化 ✅
+
+**状态**: 已完成
+**目标版本**: v0.2.3
+**完成日期**: 2026-01-09
+**实际耗时**: <0.5天
+
+### 问题背景
+- 前端默认值与后端配置不同步
+- 后端未加载 `.env` 文件
+- 代码审查发现多处潜在 bug
+- QC 视频查看器需要同时查看多相机
+
+### 2.9.1 配置同步机制 ✅
+- [x] 添加 `/api/config/defaults` 端点返回后端配置
+- [x] 前端 Pipeline 页面启动时获取默认配置
+- [x] 添加 `python-dotenv` 依赖到 `pixi.toml`
+- [x] 后端 `settings.py` 自动加载 `.env` 文件
+- [x] `.env` 文件配置值正确生效
+
+### 2.9.2 Bug修复 - Critical ✅
+- [x] `task.py`: 添加 `exclude_episodes` 字段到 UploadConfig
+- [x] `pipeline.ts`: 修复 `ready: dirs.length > 0 || true` 逻辑错误
+- [x] `download_cli.py`: 使用 `settings.BOS_ALIAS` 替代硬编码 "bos"
+- [x] `mc_executor.py`: 使用配置的 BOS 测试路径
+
+### 2.9.3 Bug修复 - High ✅
+- [x] `convert_service.py`: 使用 `sys.executable` 替代硬编码 Python 路径
+- [x] `convert.py` router: 添加输入目录验证
+- [x] `merge.py` router: 添加源目录验证
+- [x] `upload_service.py`: 添加 `cancel_task` 异常处理
+- [x] `Pipeline.vue`: 修复 `runAllChecks()` 竞态条件
+- [x] `pipeline.ts`: 修复 upload 使用 `merged_dir` 而非 `lerobot_dir`
+
+### 2.9.4 Bug修复 - Medium ✅
+- [x] `convert_cli.py`: 使用 `settings.TIMEOUT_CONVERT` 替代硬编码 300
+- [x] `merge_service.py`: 添加 `shutil.rmtree()` 异常处理
+- [x] `download.py` router: 添加任务 None 检查
+- [x] `Pipeline.vue`: 修复 QC 按钮加载状态使用 `qcLoading`
+- [x] `Pipeline.vue`: 添加 `handleQCConfirm` 错误通知
+- [x] `Pipeline.vue`: 修复 `handleMerge` 过滤器空安全检查
+
+### 2.9.5 Bug修复 - Low ✅
+- [x] `merge_cli.py`: 修复文档注释默认值 32 → 14
+
+### 2.9.6 QC视频布局优化 ✅
+- [x] 修改 `QCInspector.vue` 模板：三相机并排显示
+- [x] 添加 CSS 样式：`.video-grid`, `.video-cell`, `.camera-label`, `.video-player-small`
+- [x] 三个相机视频同步播放（环境/左腕/右腕）
+- [x] 每个视频带相机名称标签
+
+### 改进效果
+- 前端默认值与 `.env` 配置自动同步
+- 用户可通过修改 `.env` 自定义所有默认参数
+- 修复 18 个潜在 bug，提高系统稳定性
+- QC 质检可同时查看三个相机视角，提高效率
+
+---
+
 ## 阶段3: 日志和监控 ⏸️
 
 **状态**: 暂缓（合并到阶段9）
@@ -322,7 +444,7 @@ local_dir/
 
 **状态**: 待开始
 **预计时间**: 1-2天
-**目标版本**: v0.2.1
+**目标版本**: v0.3.0
 
 ### 7.1 配置持久化 ⭐⭐⭐
 - [ ] 实现 `stores/settings.ts` - 配置状态管理
@@ -360,7 +482,7 @@ local_dir/
 
 **状态**: 待开始
 **预计时间**: 2-3天
-**目标版本**: v0.3.0
+**目标版本**: v0.3.1
 
 ### 8.1 任务链（Pipeline）
 - [ ] 设计任务链数据模型
@@ -392,7 +514,7 @@ local_dir/
 
 **状态**: 待开始
 **预计时间**: 2天
-**目标版本**: v0.3.1
+**目标版本**: v0.3.2
 
 ### 9.1 实时日志系统
 - [ ] 实现 `backend/services/log_streamer.py`
@@ -457,14 +579,16 @@ local_dir/
 - v0.1.0: CLI工具版本发布（download + convert）
 - v0.2.0: Web管理界面 + 后端API服务 + CLI工具链完整（download + convert + upload + merge）
 - v0.2.1: Pipeline QC质检 + Merge功能（QC组件、结果持久化、三相机预览、快捷键）
+- v0.2.2: 配置重构（统一配置模块、环境变量支持、移除硬编码）
+- v0.2.3: Bug修复与QC优化（配置同步、python-dotenv、18处bug修复、三相机并排布局）
 
 ### 进行中 🔄
 - 无
 
 ### 待开始 ⏳
-- **阶段7**: UI/UX优化 → v0.2.2
-- **阶段8**: 功能增强 → v0.3.0
-- **阶段9**: 日志和监控 → v0.3.1
+- **阶段7**: UI/UX优化 → v0.3.0
+- **阶段8**: 功能增强 → v0.3.1
+- **阶段9**: 日志和监控 → v0.3.2
 - **阶段10**: 稳定性增强 → v0.4.0
 
 ---
@@ -528,7 +652,7 @@ local_dir/
   - 数据模型和SQLite存储
   - 下载/转换服务（异步执行、进度跟踪）
   - RESTful API（任务管理、下载、转换）
-  - 分支：feature/backend-api
+  - 开发分支：feature/backend-api（已合并到main）
 - ✅ **2025-12-28**: Web前端开发完成（阶段4完成）🎉
   - Vue 3 + TypeScript + Vite + Element Plus
   - 任务看板、下载管理、转换管理、上传管理、系统状态
@@ -565,9 +689,20 @@ local_dir/
   - **Pipeline 页面优化**: 完整工作流 Download → Convert → QC → Merge → Upload
   - **操作确认对话框**: 防止误操作
   - **快捷键支持**: ↑↓导航、P通过、F不通过、1/2/3切换相机
+- ✅ **2026-01-09**: v0.2.2 发布 - 配置重构 🎉
+  - **统一配置模块**: `backend/config/settings.py` 集中管理所有配置
+  - **环境变量支持**: 所有参数可通过 `.env` 文件配置
+  - **移除硬编码**: 删除所有开发者特定路径和魔法数字
+  - **CLI工具重构**: 关键路径参数改为必填，避免误用默认值
+  - **文档完善**: 新增 INSTALL.md，更新配置说明
+- ✅ **2026-01-09**: v0.2.3 发布 - Bug修复与QC优化 🎉
+  - **配置同步机制**: 添加 `/api/config/defaults` 端点，前端启动时获取后端配置
+  - **python-dotenv集成**: 后端自动加载 `.env` 文件，配置值正确生效
+  - **Bug修复**: 修复 18 处 Critical/High/Medium/Low 级别问题
+  - **QC视频布局**: 三相机并排显示，提高质检效率
 - ⏳ **规划中**: 阶段7-10（UI优化、功能增强、日志监控、稳定性）
 
 ---
 
 **更新频率**: 每完成一个子任务更新一次
-**最后更新**: 2026-01-07 (v0.2.1 QC + Merge 功能完成)
+**最后更新**: 2026-01-09 (v0.2.3 Bug修复与QC优化完成)

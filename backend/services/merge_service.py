@@ -30,6 +30,22 @@ class MergeService:
         self._cancel_flags: Dict[str, bool] = {}
         self.db = get_database()
 
+        # 自动检测项目根目录
+        current_file = Path(__file__).resolve()
+        self.project_root = current_file.parent.parent.parent
+
+        # 验证项目根目录
+        if not (self.project_root / ".pixi").exists():
+            # 如果找不到，尝试使用当前工作目录
+            cwd = Path.cwd()
+            if (cwd / ".pixi").exists():
+                self.project_root = cwd
+            else:
+                logger.warning(
+                    f"无法找到项目根目录（.pixi目录）。当前文件: {current_file}, 当前工作目录: {cwd}"
+                )
+                self.project_root = cwd  # 使用当前工作目录作为后备
+
     def create_task(self, request: CreateMergeTaskRequest) -> Task:
         """创建合并任务"""
         task = Task(
@@ -114,7 +130,10 @@ class MergeService:
                 task.update_progress(percent=10, message="清理现有输出目录...")
                 self.db.update(task)
                 import shutil
-                shutil.rmtree(output_path)
+                try:
+                    shutil.rmtree(output_path)
+                except Exception as e:
+                    raise ValueError(f"无法清理输出目录 {output_dir}: {e}")
 
             # 调用 pixi run merge
             task.update_progress(percent=15, message="开始合并数据集...")
@@ -136,7 +155,7 @@ class MergeService:
 
             process = subprocess.Popen(
                 cmd,
-                cwd="/home/jovyan/code/vla/Citadel",
+                cwd=str(self.project_root),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,

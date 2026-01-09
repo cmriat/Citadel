@@ -16,11 +16,14 @@ const themeStore = useThemeStore()
 // 配置记忆功能
 const STORAGE_KEY = 'citadel_download_config'
 
+// 从环境变量读取默认配置
+const DEFAULT_CONCURRENCY = parseInt(import.meta.env.VITE_DEFAULT_CONCURRENCY || '10')
+
 // 默认配置
 const defaultConfig: DownloadConfig = {
-  bos_path: 'bos:/citadel-bos/online_test_hdf5_v1/',
+  bos_path: '',  // 用户必须提供
   local_path: './data/raw',
-  concurrency: 10
+  concurrency: DEFAULT_CONCURRENCY
 }
 
 // 从localStorage读取配置

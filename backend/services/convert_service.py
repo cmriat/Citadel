@@ -6,12 +6,14 @@
 """
 
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Optional, List, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 
+from backend.config import settings
 from backend.models.task import (
     Task, TaskType, TaskStatus, TaskResult,
     CreateConvertTaskRequest
@@ -25,6 +27,21 @@ class ConvertService:
     def __init__(self):
         self._running_tasks: dict[str, threading.Thread] = {}
         self._cancel_flags: dict[str, bool] = {}
+
+        # 自动检测项目根目录（从当前文件向上查找包含 .pixi 的目录）
+        current_file = Path(__file__).resolve()
+        self.project_root = current_file.parent.parent.parent
+
+        # 验证项目根目录
+        if not (self.project_root / ".pixi").exists():
+            # 如果找不到，尝试使用当前工作目录
+            cwd = Path.cwd()
+            if (cwd / ".pixi").exists():
+                self.project_root = cwd
+            else:
+                raise RuntimeError(
+                    f"无法找到项目根目录（.pixi目录）。当前文件: {current_file}, 当前工作目录: {cwd}"
+                )
 
     def create_task(self, request: CreateConvertTaskRequest) -> Task:
         """创建转换任务"""
@@ -243,17 +260,17 @@ class ConvertService:
         episode_name = hdf5_file.stem
         output_episode_dir = output_base_dir / episode_name
 
-        # 使用pixi环境的Python绝对路径
-        PYTHON_PATH = "/data/maozan/code/Citadel_release/.pixi/envs/default/bin/python3"
+        # 使用当前运行的 Python 解释器（确保环境一致）
+        python_path = sys.executable
 
         # 构建命令
         cmd = [
-            PYTHON_PATH, "scripts/convert.py",
+            str(python_path), "scripts/convert.py",
             "--hdf5-path", str(hdf5_file),
             "--output-dir", str(output_episode_dir),
-            "--robot-type", config.get('robot_type', 'airbot_play'),
-            "--fps", str(config.get('fps', 25)),
-            "--task", config.get('task', 'Fold the laundry')
+            "--robot-type", config.get('robot_type', settings.DEFAULT_ROBOT_TYPE),
+            "--fps", str(config.get('fps', settings.DEFAULT_FPS)),
+            "--task", config.get('task', settings.DEFAULT_TASK_NAME)
         ]
 
         try:
@@ -263,10 +280,10 @@ class ConvertService:
 
             result = subprocess.run(
                 cmd,
-                cwd="/home/maozan/code/Citadel_release",
+                cwd=str(self.project_root),
                 capture_output=True,
                 text=True,
-                timeout=300,  # 5分钟超时
+                timeout=settings.TIMEOUT_CONVERT,
                 env=env
             )
 
@@ -281,7 +298,7 @@ class ConvertService:
 
         except subprocess.TimeoutExpired:
             elapsed = time.time() - start_time
-            return (False, "转换超时（>5分钟）", elapsed)
+            return (False, f"转换超时（>{settings.TIMEOUT_CONVERT}秒）", elapsed)
         except Exception as e:
             elapsed = time.time() - start_time
             return (False, f"异常: {str(e)}", elapsed)

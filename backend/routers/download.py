@@ -47,6 +47,8 @@ async def start_download(request: CreateDownloadTaskRequest):
 
     # 重新获取任务（状态已更新）
     task = service.get_task(task.id)
+    if not task:
+        raise HTTPException(status_code=500, detail="任务创建后无法获取")
 
     return task_to_response(task)
 

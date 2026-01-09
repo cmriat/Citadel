@@ -13,8 +13,8 @@ Citadel Release 是一套完整的机器人数据管理工具，包含命令行�
 - **数据集合并**: 将多个独立episode合并为单个LeRobot数据集
 - **LeRobot数据上传**: 将转换后的数据上传回BOS存储
 - **Web管理界面**: 现代化Vue 3界面，支持任务管理、进度监控
-- **并发处理**: 支持多文件并发转换，提高处理效率
-- **进度监控**: 实时显示下载、转换和上传进度
+- **QC质检功能**: 三相机视频预览，支持通过/不通过标记
+- **统一配置管理**: 通过环境变量灵活配置所有参数
 
 ## 快速开始
 
@@ -23,20 +23,67 @@ Citadel Release 是一套完整的机器人数据管理工具，包含命令行�
 1. **Linux环境** (测试于 Ubuntu 20.04+)
 2. **mc (MinIO Client)** - 需要预先配置BOS别名
 3. **pixi** - Python环境管理工具
+4. **Node.js 18+** - 用于前端开发（可选）
 
 ### 安装
+
+详细安装步骤请参考 [INSTALL.md](./INSTALL.md)。
 
 ```bash
 # 克隆项目
 git clone <repository-url>
-cd Citadel_release
+cd Citadel
 
-# 安装依赖
+# 安装后端依赖
 pixi install
+
+# 配置环境变量
+cp .env.example .env
+# 编辑 .env 文件，根据您的环境修改配置
 
 # 验证安装
 pixi run download --help
 pixi run convert --help
+```
+
+## 配置说明
+
+### 环境变量配置
+
+项目支持通过环境变量配置所有参数。复制 `.env.example` 为 `.env` 并根据需要修改：
+
+```bash
+cp .env.example .env
+```
+
+**主要配置项：**
+
+| 环境变量 | 默认值 | 说明 |
+|----------|--------|------|
+| `API_HOST` | `0.0.0.0` | API服务器监听地址 |
+| `API_PORT` | `8000` | API服务器端口 |
+| `MC_PATH` | 自动检测 | mc可执行文件路径 |
+| `BOS_TEST_PATH` | `srgdata/` | BOS连接测试路径 |
+| `DEFAULT_CONCURRENCY` | `10` | 默认并发数 |
+| `DEFAULT_FPS` | `25` | 默认视频帧率 |
+| `DEFAULT_ROBOT_TYPE` | `airbot_play` | 默认机器人类型 |
+| `DB_PATH` | `backend/data/tasks.db` | 数据库文件路径 |
+
+完整配置项请参考 [.env.example](./.env.example)。
+
+### mc工具配置
+
+确保mc已配置BOS别名：
+
+```bash
+# 检查mc版本
+mc --version
+
+# 配置BOS别名（如尚未配置）
+mc alias set bos <endpoint> <access-key> <secret-key>
+
+# 验证连接
+mc ls bos/
 ```
 
 ## 使用方式
@@ -47,7 +94,7 @@ pixi run convert --help
 
 ```bash
 # 终端1：启动后端API服务
-pixi run uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
+pixi run dev
 
 # 终端2：启动前端开发服务器
 cd frontend && npm run dev
@@ -99,18 +146,18 @@ Download → Convert → QC 质检 → Merge → Upload
 
 ```bash
 pixi run download \
-  --bos-path "srgdata/robot/raw_data/upload_test/online_test_hdf5_v1/fold_laundry/" \
-  --local-path "/home/user/data/fold_laundry/raw_hdf5/" \
+  --bos-path "srgdata/robot/raw_data/your_dataset/" \
+  --local-path "/path/to/save/" \
   --concurrency 10
 ```
 
 **参数说明：**
 | 参数 | 说明 | 默认值 |
 |------|------|--------|
-| `--bos-path` | BOS远程路径（不含bos:前缀） | `srgdata/robot/raw_data/...` |
-| `--local-path` | 本地保存路径 | `test_data/download_test/` |
-| `--concurrency` | 并发下载数 | `10` |
-| `--mc-path` | mc可执行文件路径 | `/home/maozan/mc` |
+| `--bos-path` | BOS远程路径（不含bos:前缀） | **必填** |
+| `--local-path` | 本地保存路径 | **必填** |
+| `--concurrency` | 并发下载数 | 环境变量 `DEFAULT_CONCURRENCY` 或 `10` |
+| `--mc-path` | mc可执行文件路径 | 环境变量 `MC_PATH` 或自动检测 |
 
 #### 2. 批量转换HDF5文件
 
@@ -118,8 +165,8 @@ pixi run download \
 
 ```bash
 pixi run convert \
-  --input-dir "/home/user/data/fold_laundry/raw_hdf5/" \
-  --output-dir "/home/user/data/fold_laundry/lerobot_v21/" \
+  --input-dir "/path/to/hdf5/" \
+  --output-dir "/path/to/lerobot/" \
   --robot-type "airbot_play" \
   --fps 25 \
   --task "Fold the laundry" \
@@ -129,12 +176,12 @@ pixi run convert \
 **参数说明：**
 | 参数 | 说明 | 默认值 |
 |------|------|--------|
-| `--input-dir` | 输入HDF5目录 | `test_data/download_test/` |
-| `--output-dir` | 输出LeRobot目录 | `test_data/convert_test/` |
-| `--robot-type` | 机器人类型 | `airbot_play` |
-| `--fps` | 视频帧率 | `25` |
-| `--task` | 任务描述 | `Fold the laundry` |
-| `--parallel-jobs` | 并发转换数 | `4` |
+| `--input-dir` | 输入HDF5目录 | **必填** |
+| `--output-dir` | 输出LeRobot目录 | **必填** |
+| `--robot-type` | 机器人类型 | 环境变量 `DEFAULT_ROBOT_TYPE` 或 `airbot_play` |
+| `--fps` | 视频帧率 | 环境变量 `DEFAULT_FPS` 或 `25` |
+| `--task` | 任务描述 | 环境变量 `DEFAULT_TASK_NAME` 或 `Fold the laundry` |
+| `--parallel-jobs` | 并发转换数 | 环境变量 `DEFAULT_PARALLEL_JOBS` 或 `4` |
 | `--file-pattern` | 文件匹配模式 | `episode_*.h5` |
 
 #### 3. 上传LeRobot数据
@@ -143,18 +190,18 @@ pixi run convert \
 
 ```bash
 pixi run upload \
-  --local-dir "/home/user/data/fold_laundry/lerobot_v21/" \
-  --bos-path "srgdata/robot/lerobot_data/fold_laundry/" \
+  --local-dir "/path/to/lerobot/" \
+  --bos-path "srgdata/robot/lerobot_data/your_dataset/" \
   --concurrency 10
 ```
 
 **参数说明：**
 | 参数 | 说明 | 默认值 |
 |------|------|--------|
-| `--local-dir` | 本地LeRobot目录 | `./data/lerobot/` |
-| `--bos-path` | BOS目标路径（不含bos/前缀） | `srgdata/robot/lerobot_data/` |
-| `--concurrency` | 并发上传数 | `10` |
-| `--mc-path` | mc可执行文件路径 | `/home/maozan/mc` |
+| `--local-dir` | 本地LeRobot目录 | **必填** |
+| `--bos-path` | BOS目标路径（不含bos/前缀） | **必填** |
+| `--concurrency` | 并发上传数 | 环境变量 `DEFAULT_CONCURRENCY` 或 `10` |
+| `--mc-path` | mc可执行文件路径 | 环境变量 `MC_PATH` 或自动检测 |
 
 #### 4. 合并LeRobot数据集
 
@@ -172,11 +219,11 @@ pixi run merge \
 **参数说明：**
 | 参数 | 说明 | 默认值 |
 |------|------|--------|
-| `--sources` | 源数据集路径列表（支持通配符） | 必填 |
-| `--output` | 输出合并数据集路径 | 必填 |
-| `--state-max-dim` | 状态向量最大维度 | `32` |
-| `--action-max-dim` | 动作向量最大维度 | `32` |
-| `--fps` | 视频帧率 | `25` |
+| `--sources` | 源数据集路径列表（支持通配符） | **必填** |
+| `--output` | 输出合并数据集路径 | **必填** |
+| `--state-max-dim` | 状态向量最大维度 | 环境变量 `STATE_MAX_DIM` 或 `14` |
+| `--action-max-dim` | 动作向量最大维度 | 环境变量 `ACTION_MAX_DIM` 或 `14` |
+| `--fps` | 视频帧率 | 环境变量 `DEFAULT_FPS` 或 `25` |
 | `--copy-images` | 是否复制图像文件 | `False` |
 
 **使用场景：**
@@ -194,50 +241,56 @@ pixi run merge --sources ./converted/episode_* --output ./merged/
 ## 项目结构
 
 ```
-Citadel_release/
-├── cli/                      # 命令行工具
-│   ├── download_cli.py       # 下载CLI
-│   ├── convert_cli.py        # 转换CLI
-│   ├── upload_cli.py         # 上传CLI
-│   ├── merge_cli.py          # 合并CLI
-│   └── utils/                # 工具模块
-│       ├── mc_executor.py    # mc命令封装
-│       └── progress.py       # 进度跟踪
-├── scripts/                  # 核心脚本
-│   ├── download.sh           # 下载脚本
-│   ├── convert.py            # 转换脚本
-│   └── merge_lerobot.py      # 合并脚本
-├── backend/                  # 后端API服务
-│   ├── main.py               # FastAPI入口
-│   ├── models/               # 数据模型
-│   │   └── task.py           # 任务模型
-│   ├── routers/              # API路由
-│   │   ├── tasks.py          # 任务管理API
-│   │   ├── download.py       # 下载API
-│   │   ├── convert.py        # 转换API
-│   │   ├── upload.py         # 上传API（含QC结果、视频流）
-│   │   └── merge.py          # 合并API
-│   └── services/             # 业务服务
-│       ├── database.py       # SQLite数据库
+Citadel/
+├── backend/                      # 后端API服务
+│   ├── config/                   # 统一配置模块 ⭐
+│   │   ├── __init__.py
+│   │   └── settings.py           # 配置管理
+│   ├── main.py                   # FastAPI入口
+│   ├── models/                   # 数据模型
+│   │   └── task.py               # 任务模型
+│   ├── routers/                  # API路由
+│   │   ├── tasks.py              # 任务管理API
+│   │   ├── download.py           # 下载API
+│   │   ├── convert.py            # 转换API
+│   │   ├── upload.py             # 上传API（含QC结果、视频流）
+│   │   └── merge.py              # 合并API
+│   └── services/                 # 业务服务
+│       ├── database.py           # SQLite数据库
 │       ├── download_service.py
 │       ├── convert_service.py
 │       ├── upload_service.py
-│       └── merge_service.py  # 合并服务
-├── frontend/                 # Vue 3 前端
+│       └── merge_service.py      # 合并服务
+├── cli/                          # 命令行工具
+│   ├── download_cli.py           # 下载CLI
+│   ├── convert_cli.py            # 转换CLI
+│   ├── upload_cli.py             # 上传CLI
+│   ├── merge_cli.py              # 合并CLI
+│   └── utils/                    # 工具模块
+│       ├── mc_executor.py        # mc命令封装
+│       └── progress.py           # 进度跟踪
+├── scripts/                      # 核心脚本
+│   ├── download.sh               # 下载脚本
+│   ├── convert.py                # 转换脚本
+│   └── merge_lerobot.py          # 合并脚本
+├── frontend/                     # Vue 3 前端
 │   ├── src/
-│   │   ├── views/            # 页面组件
-│   │   │   └── Pipeline.vue  # Pipeline流水线页面
-│   │   ├── components/       # 通用组件
-│   │   │   └── QCInspector.vue  # QC质检组件
-│   │   ├── api/              # API封装
-│   │   ├── stores/           # Pinia状态
-│   │   └── router/           # 路由配置
+│   │   ├── views/                # 页面组件
+│   │   │   └── Pipeline.vue      # Pipeline流水线页面
+│   │   ├── components/           # 通用组件
+│   │   │   └── QCInspector.vue   # QC质检组件
+│   │   ├── api/                  # API封装
+│   │   ├── stores/               # Pinia状态
+│   │   └── router/               # 路由配置
+│   ├── .env.example              # 前端环境变量模板
 │   ├── package.json
 │   └── vite.config.ts
-├── pixi.toml                 # Python依赖配置
-├── README.md                 # 本文件
-├── USER_GUIDE.md             # 用户指南
-└── PROGRESS.md               # 开发进度
+├── .env.example                  # 后端环境变量模板 ⭐
+├── pixi.toml                     # Python依赖配置
+├── INSTALL.md                    # 安装指南 ⭐
+├── README.md                     # 本文件
+├── USER_GUIDE.md                 # 用户指南
+└── PROGRESS.md                   # 开发进度
 ```
 
 ## 数据格式
@@ -321,27 +374,10 @@ BOS存储 (LeRobot格式)
 | 合并 | 232个 episodes | 644MB | <1分钟 | - |
 | 上传 | 1856个文件 | 640MB | ~10秒 | 220 files/s |
 
-## 配置说明
-
-### mc工具配置
-
-确保mc已配置BOS别名：
-
-```bash
-# 检查mc版本
-/home/maozan/mc --version
-
-# 配置BOS别名（如尚未配置）
-mc alias set bos <endpoint> <access-key> <secret-key>
-
-# 验证连接
-mc ls bos/
-```
-
 ## 常见问题
 
 ### Q: mc命令未找到？
-A: 确认mc已安装并路径正确。使用 `--mc-path` 参数指定路径。
+A: 确认mc已安装并路径正确。可以通过环境变量 `MC_PATH` 指定路径，或确保mc在系统PATH中。
 
 ### Q: pixi install失败？
 A: 检查网络连接，确保conda-forge镜像可访问。
@@ -352,8 +388,11 @@ A: 常见原因：
 2. 时间戳数据异常 - 检查joints数据中的timestamp_sec/timestamp_nanosec
 3. 图像解码失败 - 检查frames_jpeg是否为有效JPEG数据
 
-### Q: 如何查看详细日志？
-A: 转换脚本会在控制台输出详细进度，包括每帧的时间对齐信息。
+### Q: 如何在新环境部署？
+A: 参考 [INSTALL.md](./INSTALL.md) 安装指南，主要步骤：
+1. 安装 pixi 和 mc 工具
+2. 复制并修改 `.env.example` 为 `.env`
+3. 运行 `pixi install`
 
 ## 开发路线
 
@@ -362,24 +401,28 @@ A: 转换脚本会在控制台输出详细进度，包括每帧的时间对齐�
   - 后端API服务 + Web管理界面
   - 完整CLI工具链：download + convert + **merge** + upload
   - 数据集合并功能：支持多episode合并、维度自适应对齐
-- [x] **v0.2.1** - Pipeline QC质检 + Merge 功能（当前）
+- [x] **v0.2.1** - Pipeline QC质检 + Merge 功能
   - Pipeline 页面：一站式流水线操作
   - QC 质检组件：三相机视频预览、通过/不通过标记
   - QC 结果持久化：自动保存和恢复进度
   - Merge 集成：仅合并通过质检的 episode
-  - 操作确认对话框：防止误操作
+- [x] **v0.2.2** - 配置重构（当前）
+  - 统一配置管理模块
+  - 环境变量支持
+  - 移除硬编码路径和魔法数字
 - [ ] **v0.3.0** - 功能增强、日志监控
 
 ## 许可证
 
 MIT License
 
-## 开发进度
+## 相关文档
 
-查看 [PROGRESS.md](./PROGRESS.md) 了解当前开发状态。
-查看 [USER_GUIDE.md](./USER_GUIDE.md) 了解详细使用指南。
+- [INSTALL.md](./INSTALL.md) - 环境安装指南
+- [USER_GUIDE.md](./USER_GUIDE.md) - 详细使用指南
+- [PROGRESS.md](./PROGRESS.md) - 开发进度
 
 ---
 
-**版本**: v0.2.1
-**最后更新**: 2026-01-07
+**版本**: v0.2.2
+**最后更新**: 2026-01-09

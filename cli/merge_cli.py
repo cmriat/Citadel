@@ -52,8 +52,8 @@ def merge(
     Args:
         sources: 源数据集文件夹路径列表（必须是LeRobot v2.1格式）
         output: 输出合并数据集的文件夹路径
-        state_max_dim: 状态向量的最大维度（默认32）
-        action_max_dim: 动作向量的最大维度（默认32）
+        state_max_dim: 状态向量的最大维度（默认14）
+        action_max_dim: 动作向量的最大维度（默认14）
         fps: 视频帧率（默认25）
         copy_images: 是否复制图像文件（默认False，仅复制视频）
     """

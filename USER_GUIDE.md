@@ -5,13 +5,14 @@
 ## 目录
 
 1. [快速入门](#快速入门)
-2. [下载CLI详解](#下载cli详解)
-3. [转换CLI详解](#转换cli详解)
-4. [合并CLI详解](#合并cli详解)
-5. [上传CLI详解](#上传cli详解)
-6. [数据格式说明](#数据格式说明)
-7. [技术原理](#技术原理)
-8. [故障排除](#故障排除)
+2. [环境变量配置](#环境变量配置)
+3. [下载CLI详解](#下载cli详解)
+4. [转换CLI详解](#转换cli详解)
+5. [合并CLI详解](#合并cli详解)
+6. [上传CLI详解](#上传cli详解)
+7. [数据格式说明](#数据格式说明)
+8. [技术原理](#技术原理)
+9. [故障排除](#故障排除)
 
 ---
 
@@ -21,13 +22,19 @@
 
 ### 步骤1：安装环境
 
+详细安装步骤请参考 [INSTALL.md](./INSTALL.md)。
+
 ```bash
 # 确保已安装pixi
 curl -fsSL https://pixi.sh/install.sh | bash
 
 # 进入项目目录并安装依赖
-cd /data/maozan/code/Citadel_release
+cd Citadel
 pixi install
+
+# 复制环境变量配置文件
+cp .env.example .env
+# 根据您的环境修改 .env 文件
 ```
 
 ### 步骤2：配置mc工具
@@ -35,14 +42,14 @@ pixi install
 确保mc工具已配置BOS访问：
 
 ```bash
-# 检查mc是否可用
-/home/maozan/mc --version
+# 检查mc是否可用（mc会从PATH或环境变量MC_PATH查找）
+mc --version
 
 # 如果未配置，添加BOS别名
-/home/maozan/mc alias set bos <endpoint> <access-key> <secret-key>
+mc alias set bos <endpoint> <access-key> <secret-key>
 
 # 验证连接
-/home/maozan/mc ls bos/
+mc ls bos/
 ```
 
 ### 步骤3：下载数据
@@ -89,6 +96,81 @@ pixi run upload \
 
 ---
 
+## 环境变量配置
+
+项目支持通过环境变量配置所有参数，避免硬编码路径和魔法数字。
+
+### 配置方法
+
+复制 `.env.example` 为 `.env` 并根据需要修改：
+
+```bash
+cp .env.example .env
+```
+
+### 后端配置项
+
+| 环境变量 | 默认值 | 说明 |
+|----------|--------|------|
+| `API_HOST` | `0.0.0.0` | API服务器监听地址 |
+| `API_PORT` | `8000` | API服务器端口 |
+| `MC_PATH` | 自动检测 | mc可执行文件路径 |
+| `BOS_ALIAS` | `bos` | mc配置的BOS别名 |
+| `BOS_TEST_PATH` | `srgdata/` | BOS连接测试路径 |
+| `DEFAULT_CONCURRENCY` | `10` | 默认并发数 |
+| `DEFAULT_FPS` | `25` | 默认视频帧率 |
+| `DEFAULT_ROBOT_TYPE` | `airbot_play` | 默认机器人类型 |
+| `DEFAULT_TASK_NAME` | `Fold the laundry` | 默认任务描述 |
+| `DEFAULT_PARALLEL_JOBS` | `4` | 默认并行转换任务数 |
+| `STATE_MAX_DIM` | `14` | 状态向量最大维度 |
+| `ACTION_MAX_DIM` | `14` | 动作向量最大维度 |
+| `DB_PATH` | `backend/data/tasks.db` | 数据库文件路径 |
+| `TIMEOUT_MC_CHECK` | `30` | mc连接检查超时(秒) |
+| `TIMEOUT_CONVERT_FILE` | `300` | 单文件转换超时(秒) |
+| `CORS_ORIGINS` | `http://localhost:5173` | 允许的CORS来源 |
+
+### 前端配置项
+
+前端配置在 `frontend/.env` 文件中：
+
+| 环境变量 | 默认值 | 说明 |
+|----------|--------|------|
+| `VITE_API_PORT` | `8000` | 后端API端口 |
+| `VITE_DEV_PORT` | `5173` | 前端开发服务器端口 |
+| `VITE_DEFAULT_CONCURRENCY` | `10` | 默认并发数 |
+| `VITE_API_TIMEOUT` | `30000` | API请求超时(毫秒) |
+
+### mc路径查找优先级
+
+系统按以下顺序查找mc可执行文件：
+
+1. 环境变量 `MC_PATH` 指定的路径
+2. 用户目录 `~/bin/mc`
+3. 系统PATH中的 `mc` 命令
+
+### 配置示例
+
+**.env 文件示例：**
+```bash
+# API服务器配置
+API_HOST=0.0.0.0
+API_PORT=8000
+
+# mc工具配置（如果mc在非标准位置）
+MC_PATH=/usr/local/bin/mc
+BOS_ALIAS=bos
+
+# 默认参数
+DEFAULT_CONCURRENCY=15
+DEFAULT_FPS=30
+
+# 数据维度（根据机器人类型调整）
+STATE_MAX_DIM=14
+ACTION_MAX_DIM=14
+```
+
+---
+
 ## 下载CLI详解
 
 ### 命令格式
@@ -101,16 +183,18 @@ pixi run download [OPTIONS]
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `--bos-path` | string | `srgdata/robot/raw_data/.../fold_laundry/` | BOS远程路径 |
-| `--local-path` | string | `test_data/download_test/` | 本地保存目录 |
-| `--concurrency` | int | `10` | 并发下载数（推荐10-15） |
-| `--mc-path` | string | `/home/maozan/mc` | mc可执行文件路径 |
+| `--bos-path` | string | **必填** | BOS远程路径 |
+| `--local-path` | string | **必填** | 本地保存目录 |
+| `--concurrency` | int | 环境变量 `DEFAULT_CONCURRENCY` 或 `10` | 并发下载数（推荐10-15） |
+| `--mc-path` | string | 环境变量 `MC_PATH` 或自动检测 | mc可执行文件路径 |
 
 ### 使用示例
 
 **基础用法：**
 ```bash
-pixi run download
+pixi run download \
+  --bos-path "srgdata/robot/raw_data/your_task/" \
+  --local-path "./data/raw/"
 ```
 
 **自定义路径：**
@@ -177,19 +261,21 @@ pixi run convert [OPTIONS]
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `--input-dir` | string | `test_data/download_test/` | 输入HDF5目录 |
-| `--output-dir` | string | `test_data/convert_test/` | 输出LeRobot目录 |
-| `--robot-type` | string | `airbot_play` | 机器人类型标识 |
-| `--fps` | int | `25` | 输出视频帧率 |
-| `--task` | string | `Fold the laundry` | 任务描述 |
-| `--parallel-jobs` | int | `4` | 并发转换数 |
+| `--input-dir` | string | **必填** | 输入HDF5目录 |
+| `--output-dir` | string | **必填** | 输出LeRobot目录 |
+| `--robot-type` | string | 环境变量 `DEFAULT_ROBOT_TYPE` 或 `airbot_play` | 机器人类型标识 |
+| `--fps` | int | 环境变量 `DEFAULT_FPS` 或 `25` | 输出视频帧率 |
+| `--task` | string | 环境变量 `DEFAULT_TASK_NAME` 或 `Fold the laundry` | 任务描述 |
+| `--parallel-jobs` | int | 环境变量 `DEFAULT_PARALLEL_JOBS` 或 `4` | 并发转换数 |
 | `--file-pattern` | string | `episode_*.h5` | 文件匹配模式 |
 
 ### 使用示例
 
 **基础用法：**
 ```bash
-pixi run convert
+pixi run convert \
+  --input-dir "./data/raw/" \
+  --output-dir "./data/lerobot/"
 ```
 
 **指定机器人类型和任务：**
@@ -259,11 +345,11 @@ pixi run merge [OPTIONS]
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `--sources` | list[str] | 必填 | 源数据集路径列表（支持通配符） |
-| `--output` | string | 必填 | 输出合并数据集路径 |
-| `--state-max-dim` | int | `32` | 状态向量最大维度 |
-| `--action-max-dim` | int | `32` | 动作向量最大维度 |
-| `--fps` | int | `25` | 视频帧率 |
+| `--sources` | list[str] | **必填** | 源数据集路径列表（支持通配符） |
+| `--output` | string | **必填** | 输出合并数据集路径 |
+| `--state-max-dim` | int | 环境变量 `STATE_MAX_DIM` 或 `14` | 状态向量最大维度 |
+| `--action-max-dim` | int | 环境变量 `ACTION_MAX_DIM` 或 `14` | 动作向量最大维度 |
+| `--fps` | int | 环境变量 `DEFAULT_FPS` 或 `25` | 视频帧率 |
 | `--copy-images` | bool | `False` | 是否复制图像文件 |
 
 ### 使用示例
@@ -407,16 +493,18 @@ pixi run upload [OPTIONS]
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `--local-dir` | string | `./data/lerobot/` | 本地LeRobot数据集目录 |
-| `--bos-path` | string | `srgdata/robot/lerobot_data/` | BOS目标路径（不含bos/前缀） |
-| `--concurrency` | int | `10` | 并发上传数（推荐10-15） |
-| `--mc-path` | string | `/home/maozan/mc` | mc可执行文件路径 |
+| `--local-dir` | string | **必填** | 本地LeRobot数据集目录 |
+| `--bos-path` | string | **必填** | BOS目标路径（不含bos/前缀） |
+| `--concurrency` | int | 环境变量 `DEFAULT_CONCURRENCY` 或 `10` | 并发上传数（推荐10-15） |
+| `--mc-path` | string | 环境变量 `MC_PATH` 或自动检测 | mc可执行文件路径 |
 
 ### 使用示例
 
 **基础用法：**
 ```bash
-pixi run upload
+pixi run upload \
+  --local-dir "./data/merged/" \
+  --bos-path "srgdata/robot/lerobot_data/my_dataset/"
 ```
 
 **指定本地目录和BOS路径：**
@@ -772,5 +860,5 @@ ffprobe test_data/convert_test/episode_0001/videos/chunk-000/episode_000000/cam_
 
 ---
 
-**文档版本**: v0.1.0
-**最后更新**: 2025-12-28
+**文档版本**: v0.2.2
+**最后更新**: 2026-01-09

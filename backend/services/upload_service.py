@@ -16,6 +16,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+from backend.config import settings
 from backend.models.task import (
     Task, TaskType, TaskStatus, TaskResult,
     CreateUploadTaskRequest
@@ -26,8 +27,12 @@ from backend.services.database import get_database
 class UploadService:
     """上传服务类"""
 
-    def __init__(self, mc_path: str = "/home/jovyan/mc"):
-        self.mc_path = mc_path
+    def __init__(self, mc_path: str = None):
+        # 使用统一配置获取 mc 路径
+        if mc_path is None:
+            mc_path = settings.get_mc_path()
+
+        self.mc_path = Path(mc_path)
         self.db = get_database()
         self._running_tasks: Dict[str, subprocess.Popen] = {}
 
@@ -38,7 +43,7 @@ class UploadService:
                 [self.mc_path, "--version"],
                 capture_output=True,
                 text=True,
-                timeout=5
+                timeout=settings.TIMEOUT_MC_CHECK
             )
             if result.returncode == 0:
                 version = result.stdout.strip().split('\n')[0]
@@ -212,7 +217,7 @@ class UploadService:
                     img.thumbnail(size)
 
                     buffer = BytesIO()
-                    img.save(buffer, format='JPEG', quality=70)
+                    img.save(buffer, format='JPEG', quality=settings.JPEG_QUALITY)
                     thumbnails.append(
                         f"data:image/jpeg;base64,{base64.b64encode(buffer.getvalue()).decode()}"
                     )
@@ -307,7 +312,7 @@ class UploadService:
         config = task.config
         local_dir = config["local_dir"]
         bos_path = config["bos_path"]
-        concurrency = config.get("concurrency", 10)
+        concurrency = config.get("concurrency", settings.DEFAULT_CONCURRENCY)
         mc_path = config.get("mc_path", self.mc_path)
         exclude_episodes = config.get("exclude_episodes") or []
 
@@ -319,8 +324,8 @@ class UploadService:
             self.db.update(task)
 
             # 确保 bos_path 有正确的前缀
-            if not bos_path.startswith("bos/"):
-                bos_path = f"bos/{bos_path}"
+            if not bos_path.startswith(f"{settings.BOS_ALIAS}/"):
+                bos_path = f"{settings.BOS_ALIAS}/{bos_path}"
 
             # 如果有排除列表，逐个上传选中的 episode
             if exclude_episodes:
@@ -514,7 +519,7 @@ class UploadService:
                     cmd,
                     capture_output=True,
                     text=True,
-                    timeout=3600  # 1 小时超时
+                    timeout=settings.TIMEOUT_UPLOAD
                 )
                 if result.returncode == 0:
                     uploaded += 1
@@ -587,8 +592,12 @@ class UploadService:
         # 如果正在运行，终止进程
         if task_id in self._running_tasks:
             process = self._running_tasks[task_id]
-            process.terminate()
-            del self._running_tasks[task_id]
+            try:
+                process.terminate()
+            except Exception:
+                pass  # 进程可能已退出
+            finally:
+                self._running_tasks.pop(task_id, None)
 
         task.cancel()
         self.db.update(task)

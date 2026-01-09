@@ -2,18 +2,44 @@
 HDF5转换命令行工具
 
 使用示例:
-    pixi run convert
     pixi run convert --input-dir "/path/to/hdf5/" --output-dir "/path/to/output/"
     pixi run convert --help
+
+环境变量:
+    DEFAULT_ROBOT_TYPE: 默认机器人类型 (默认: airbot_play)
+    DEFAULT_FPS: 默认帧率 (默认: 25)
+    DEFAULT_TASK_NAME: 默认任务描述 (默认: Fold the laundry)
+    DEFAULT_PARALLEL_JOBS: 默认并行任务数 (默认: 4)
+    DEFAULT_FILE_PATTERN: 默认文件匹配模式 (默认: episode_*.h5)
+    TIMEOUT_CONVERT: 单文件转换超时秒数 (默认: 300)
 """
 
+import os
 import tyro
 from pathlib import Path
 import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Tuple, List
+from typing import Tuple, List, Optional
 from termcolor import colored
+
+from backend.config import settings
+
+
+def _get_env(key: str, default: str) -> str:
+    """从环境变量获取字符串值"""
+    return os.environ.get(key, default)
+
+
+def _get_env_int(key: str, default: int) -> int:
+    """从环境变量获取整数值"""
+    value = os.environ.get(key)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
 
 
 def convert_single_file(
@@ -58,7 +84,7 @@ def convert_single_file(
             cwd=str(project_root),
             capture_output=True,
             text=True,
-            timeout=300  # 5分钟超时
+            timeout=settings.TIMEOUT_CONVERT
         )
 
         elapsed = time.time() - start_time
@@ -80,13 +106,13 @@ def convert_single_file(
 
 
 def convert(
-    input_dir: str = "/home/jovyan/code/vla/temp_datas/1225_qz2/raw",
-    output_dir: str = "/home/jovyan/code/vla/temp_datas/1225_qz2/lerobot/",
-    robot_type: str = "airbot_play",
-    fps: int = 25,
-    task: str = "Fold the laundry",
-    parallel_jobs: int = 10,
-    file_pattern: str = "episode_*.h5"
+    input_dir: str,
+    output_dir: str,
+    robot_type: Optional[str] = None,
+    fps: Optional[int] = None,
+    task: Optional[str] = None,
+    parallel_jobs: Optional[int] = None,
+    file_pattern: Optional[str] = None
 ):
     """
     批量转换HDF5文件为LeRobot v2.1格式
@@ -94,12 +120,23 @@ def convert(
     Args:
         input_dir: 输入HDF5目录
         output_dir: 输出LeRobot目录
-        robot_type: 机器人类型
-        fps: 视频帧率
-        task: 任务描述
-        parallel_jobs: 并发任务数（推荐4-8）
-        file_pattern: 文件匹配模式（glob格式）
+        robot_type: 机器人类型（默认从环境变量 DEFAULT_ROBOT_TYPE 读取，或使用 'airbot_play'）
+        fps: 视频帧率（默认从环境变量 DEFAULT_FPS 读取，或使用 25）
+        task: 任务描述（默认从环境变量 DEFAULT_TASK_NAME 读取，或使用 'Fold the laundry'）
+        parallel_jobs: 并发任务数（默认从环境变量 DEFAULT_PARALLEL_JOBS 读取，或使用 4）
+        file_pattern: 文件匹配模式（默认从环境变量 DEFAULT_FILE_PATTERN 读取，或使用 'episode_*.h5'）
     """
+    # 从环境变量获取默认值
+    if robot_type is None:
+        robot_type = _get_env("DEFAULT_ROBOT_TYPE", "airbot_play")
+    if fps is None:
+        fps = _get_env_int("DEFAULT_FPS", 25)
+    if task is None:
+        task = _get_env("DEFAULT_TASK_NAME", "Fold the laundry")
+    if parallel_jobs is None:
+        parallel_jobs = _get_env_int("DEFAULT_PARALLEL_JOBS", 4)
+    if file_pattern is None:
+        file_pattern = _get_env("DEFAULT_FILE_PATTERN", "episode_*.h5")
     print("=" * 80)
     print(colored("🔄 HDF5批量转换工具 - Citadel Release", "cyan", attrs=["bold"]))
     print("=" * 80)

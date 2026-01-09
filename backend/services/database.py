@@ -12,13 +12,16 @@ from typing import List, Optional, Dict, Any
 from contextlib import contextmanager
 import threading
 
+from backend.config import settings
 from backend.models.task import Task, TaskStatus, TaskType
 
 
 class DatabaseService:
     """SQLite数据库服务"""
 
-    def __init__(self, db_path: str = "backend/data/tasks.db"):
+    def __init__(self, db_path: str = None):
+        if db_path is None:
+            db_path = settings.DB_PATH
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._local = threading.local()
@@ -210,8 +213,10 @@ class DatabaseService:
         """获取所有运行中的任务"""
         return self.list_all(status=TaskStatus.RUNNING)
 
-    def cleanup_old_tasks(self, days: int = 30) -> int:
+    def cleanup_old_tasks(self, days: int = None) -> int:
         """清理超过指定天数的已完成任务"""
+        if days is None:
+            days = settings.TASK_CLEANUP_DAYS
         from datetime import timedelta
         cutoff = datetime.now() - timedelta(days=days)
         cutoff_str = self._serialize_datetime(cutoff)

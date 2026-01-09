@@ -2,9 +2,13 @@
 BOS上传命令行工具
 
 使用示例:
-    pixi run upload
     pixi run upload --local-dir "./data/lerobot/episode_0001" --bos-path "srgdata/robot/lerobot_data/"
     pixi run upload --help
+
+环境变量:
+    MC_PATH: mc可执行文件路径
+    DEFAULT_CONCURRENCY: 默认并发数 (默认: 10)
+    BOS_TEST_PATH: BOS连接测试路径 (默认: srgdata/)
 """
 
 import os
@@ -19,6 +23,17 @@ import tyro
 from termcolor import colored
 
 
+def _get_env_int(key: str, default: int) -> int:
+    """从环境变量获取整数值"""
+    value = os.environ.get(key)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
+
 @dataclass
 class UploadProgress:
     """上传进度信息"""
@@ -31,7 +46,7 @@ class UploadProgress:
 class UploadCLI:
     """上传命令行工具"""
 
-    def __init__(self, mc_path: str = "/home/jovyan/mc"):
+    def __init__(self, mc_path: str = "mc"):
         self.mc_path = mc_path
         self.progress = UploadProgress()
 
@@ -56,8 +71,10 @@ class UploadCLI:
     def check_connection(self) -> Tuple[bool, str]:
         """检查BOS连接"""
         try:
+            # 使用环境变量配置的测试路径
+            bos_test_path = os.environ.get("BOS_TEST_PATH", "srgdata/")
             result = subprocess.run(
-                [self.mc_path, "ls", "bos/srgdata/"],
+                [self.mc_path, "ls", f"bos/{bos_test_path}"],
                 capture_output=True,
                 text=True,
                 timeout=10
@@ -205,10 +222,10 @@ class UploadCLI:
 
 
 def upload(
-    local_dir: str = "./data/lerobot/",
-    bos_path: str = "srgdata/robot/lerobot_data/",
-    concurrency: int = 10,
-    mc_path: str = "/home/jovyan/mc"
+    local_dir: str,
+    bos_path: str,
+    concurrency: Optional[int] = None,
+    mc_path: str = "mc"
 ):
     """
     上传LeRobot数据到BOS
@@ -216,9 +233,17 @@ def upload(
     Args:
         local_dir: 本地LeRobot目录路径
         bos_path: BOS目标路径（不需要bos/前缀）
-        concurrency: 并发上传数（推荐10-15）
-        mc_path: mc可执行文件路径
+        concurrency: 并发上传数（默认从环境变量 DEFAULT_CONCURRENCY 读取，或使用 10）
+        mc_path: mc可执行文件路径（默认从环境变量 MC_PATH 读取，或使用 'mc'）
     """
+    # 从环境变量获取默认值
+    if concurrency is None:
+        concurrency = _get_env_int("DEFAULT_CONCURRENCY", 10)
+
+    # mc_path 从环境变量获取
+    env_mc_path = os.environ.get("MC_PATH")
+    if env_mc_path and mc_path == "mc":
+        mc_path = env_mc_path
     print("=" * 80)
     print(colored("📤 BOS上传工具 - Citadel Release", "cyan", attrs=["bold"]))
     print("=" * 80)

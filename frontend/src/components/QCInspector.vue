@@ -379,30 +379,24 @@ watch(visible, (val) => {
                 {{ currentEpisodeData.frame_count }} 帧 · {{ formatSize(currentEpisodeData.size) }}
               </span>
             </div>
-            <!-- 相机切换 -->
-            <div class="camera-tabs">
-              <el-button-group>
-                <el-button
-                  v-for="cam in cameras"
-                  :key="cam.id"
-                  :type="currentCamera === cam.id ? 'primary' : 'default'"
-                  size="small"
-                  @click="currentCamera = cam.id"
-                >
-                  <Icon :icon="cam.icon" /> {{ cam.label }}
-                </el-button>
-              </el-button-group>
-            </div>
           </div>
 
-          <video
-            ref="videoRef"
-            :key="videoKey"
-            :src="getVideoUrl(currentEpisode)"
-            controls
-            autoplay
-            class="video-player"
-          />
+          <!-- 三个相机并排显示 -->
+          <div class="video-grid">
+            <div v-for="cam in cameras" :key="cam.id" class="video-cell">
+              <div class="camera-label">
+                <Icon :icon="cam.icon" /> {{ cam.label }}
+              </div>
+              <video
+                :key="`${currentEpisode}-${cam.id}`"
+                :src="getVideoUrl(currentEpisode, cam.id)"
+                controls
+                autoplay
+                muted
+                class="video-player-small"
+              />
+            </div>
+          </div>
 
           <div class="qc-actions">
             <el-button
@@ -638,26 +632,44 @@ watch(visible, (val) => {
   color: var(--el-text-color-secondary);
 }
 
-.camera-tabs {
+/* 三相机并排布局 */
+.video-grid {
   display: flex;
-  gap: 4px;
+  gap: 8px;
+  flex: 1;
+  padding: 8px;
+  min-height: 0;
 }
 
-.camera-tabs .el-button {
+.video-cell {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 6px;
+  overflow: hidden;
+  background: #000;
+}
+
+.camera-label {
   display: flex;
   align-items: center;
-  gap: 4px;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: var(--el-fill-color);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--el-text-color-regular);
 }
 
-.camera-tabs .iconify {
-  font-size: 14px;
-}
-
-.video-player {
+.video-player-small {
   flex: 1;
   width: 100%;
-  background: #000;
   min-height: 0;
+  object-fit: contain;
+  background: #000;
 }
 
 .qc-actions {

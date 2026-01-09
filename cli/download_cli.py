@@ -2,17 +2,34 @@
 BOS下载命令行工具
 
 使用示例:
-    pixi run download
-    pixi run download --bos-path "srgdata/..." --local-path "/home/maozan/data/..."
+    pixi run download --bos-path "srgdata/..." --local-path "/path/to/save/"
     pixi run download --help
+
+环境变量:
+    MC_PATH: mc可执行文件路径
+    DEFAULT_CONCURRENCY: 默认并发数 (默认: 10)
+    BOS_ALIAS: BOS别名 (默认: bos)
 """
 
+import os
 import tyro
 import time
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional
 from termcolor import colored
 from cli.utils.mc_executor import MCExecutor
+from backend.config import settings
+
+
+def _get_env_int(key: str, default: int) -> int:
+    """从环境变量获取整数值"""
+    value = os.environ.get(key)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
 
 
 class ProgressTracker:
@@ -82,10 +99,10 @@ class ProgressTracker:
 
 
 def download(
-    bos_path: str = "srgdata/robot/raw_data/upload_test/1231_qz2_laundry_online_data_upload/quad_arm_task/",
-    local_path: str = "/home/jovyan/code/vla/temp_datas/1231_qz2/raw/",
-    concurrency: int = 10,
-    mc_path: str = "/home/jovyan/mc"
+    bos_path: str,
+    local_path: str,
+    concurrency: Optional[int] = None,
+    mc_path: str = "mc"
 ):
     """
     从BOS下载HDF5文件
@@ -93,9 +110,17 @@ def download(
     Args:
         bos_path: BOS远程路径（不包含bos:前缀）
         local_path: 本地保存路径
-        concurrency: 并发数（推荐10-15）
-        mc_path: mc可执行文件路径
+        concurrency: 并发数（默认从环境变量 DEFAULT_CONCURRENCY 读取，或使用 10）
+        mc_path: mc可执行文件路径（默认从环境变量 MC_PATH 读取，或使用 'mc'）
     """
+    # 从环境变量获取默认值
+    if concurrency is None:
+        concurrency = _get_env_int("DEFAULT_CONCURRENCY", 10)
+
+    # mc_path 从环境变量获取
+    env_mc_path = os.environ.get("MC_PATH")
+    if env_mc_path and mc_path == "mc":
+        mc_path = env_mc_path
     print("=" * 80)
     print(colored("📥 BOS下载工具 - Citadel Release", "cyan", attrs=["bold"]))
     print("=" * 80)
@@ -136,7 +161,7 @@ def download(
     start_time = time.time()
 
     success, error = executor.mirror(
-        source=f"bos/{bos_path}",
+        source=f"{settings.BOS_ALIAS}/{bos_path}",
         dest=local_path,
         concurrency=concurrency,
         progress_callback=tracker.update

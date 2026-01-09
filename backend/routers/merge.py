@@ -2,6 +2,7 @@
 合并API路由
 """
 
+from pathlib import Path
 from fastapi import APIRouter, HTTPException
 
 from backend.models.task import CreateMergeTaskRequest, TaskResponse
@@ -35,6 +36,21 @@ async def start_merge(request: CreateMergeTaskRequest):
 
     if not request.output_dir:
         raise HTTPException(status_code=400, detail="输出目录不能为空")
+
+    # 验证源目录是否存在且为有效的 LeRobot 格式
+    for src_dir in request.source_dirs:
+        src_path = Path(src_dir)
+        if not src_path.exists():
+            raise HTTPException(status_code=400, detail=f"源目录不存在: {src_dir}")
+        if not src_path.is_dir():
+            raise HTTPException(status_code=400, detail=f"路径不是目录: {src_dir}")
+        # 检查是否为有效的 LeRobot 格式（应有 meta/info.json）
+        info_file = src_path / "meta" / "info.json"
+        if not info_file.exists():
+            raise HTTPException(
+                status_code=400,
+                detail=f"无效的 LeRobot 数据目录（缺少 meta/info.json）: {src_dir}"
+            )
 
     # 创建任务
     task = service.create_task(request)

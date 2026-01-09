@@ -1,10 +1,13 @@
 import axios from 'axios'
 import type { AxiosInstance, AxiosResponse } from 'axios'
 
+// 从环境变量读取配置，提供合理的默认值
+const API_TIMEOUT = parseInt(import.meta.env.VITE_API_TIMEOUT || '30000')
+
 // API instance
 const api: AxiosInstance = axios.create({
   baseURL: '/api',
-  timeout: 30000,
+  timeout: API_TIMEOUT,
   headers: {
     'Content-Type': 'application/json'
   }
@@ -73,3 +76,17 @@ export interface HealthCheck {
     bos_connection: boolean
   }
 }
+
+export interface DefaultConfig {
+  bos_alias: string
+  bos_default_prefix: string
+  default_task_name: string
+  default_robot_type: string
+  default_fps: number
+  default_concurrency: number
+  default_file_pattern: string
+  default_parallel_jobs: number
+}
+
+// 获取后端默认配置
+export const getDefaults = (): Promise<DefaultConfig> => api.get('/config/defaults')

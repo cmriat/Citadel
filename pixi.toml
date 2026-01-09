@@ -26,6 +26,7 @@ termcolor = "*"
 # 系统工具
 psutil = ">=5.9.0"
 pydantic = ">=2.0.0"
+python-dotenv = ">=1.0.0"
 # WebSocket支持
 websockets = "*"
 
