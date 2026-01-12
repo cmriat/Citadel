@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, watch, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { Icon } from '@iconify/vue'
 import { useThemeStore } from '@/stores/theme'
@@ -20,8 +20,6 @@ const handleToggleTheme = () => {
   themeStore.toggleTheme()
 }
 
-// 监听路由变化
-import { watch, onMounted } from 'vue'
 onMounted(() => {
   console.log('[Layout] Mounted at:', route.fullPath)
 })

@@ -95,6 +95,8 @@ export const useTemplateStore = defineStore('templates', () => {
     if (index === -1) return false
 
     const template = templates.value[index]
+    if (!template) return false
+
     if (updates.name) template.name = updates.name
     if (updates.config) template.config = { ...updates.config }
     template.updatedAt = new Date().toISOString()
@@ -109,6 +111,8 @@ export const useTemplateStore = defineStore('templates', () => {
     if (index === -1) return false
 
     const deleted = templates.value.splice(index, 1)[0]
+    if (!deleted) return false
+
     saveToStorage()
     console.log('[TemplateStore] Deleted template:', deleted.name)
     return true

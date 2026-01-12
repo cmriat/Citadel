@@ -92,33 +92,31 @@ const formatSpeed = (bytesPerSec: number): string => {
         <el-button-group>
           <el-button
             size="small"
-            :icon="() => h(Icon, { icon: 'mdi:eye' })"
             @click="emit('view', row)"
-          />
+          >
+            <Icon icon="mdi:eye" />
+          </el-button>
           <el-button
             v-if="row.status === 'running' || row.status === 'pending'"
             size="small"
             type="warning"
-            :icon="() => h(Icon, { icon: 'mdi:stop' })"
             @click="emit('cancel', row.id)"
-          />
+          >
+            <Icon icon="mdi:stop" />
+          </el-button>
           <el-button
             v-else
             size="small"
             type="danger"
-            :icon="() => h(Icon, { icon: 'mdi:delete' })"
             @click="emit('delete', row.id)"
-          />
+          >
+            <Icon icon="mdi:delete" />
+          </el-button>
         </el-button-group>
       </template>
     </el-table-column>
   </el-table>
 </template>
-
-<script lang="ts">
-import { h } from 'vue'
-export default {}
-</script>
 
 <style scoped>
 .type-cell {

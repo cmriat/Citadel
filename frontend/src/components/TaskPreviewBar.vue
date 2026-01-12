@@ -11,7 +11,16 @@ const themeStore = useThemeStore()
 const runningTask = computed(() => taskStore.runningTasks[0] || null)
 
 // 统计数据
-const stats = computed(() => taskStore.stats || { running: 0, pending: 0, completed: 0, failed: 0 })
+const stats = computed(() => {
+  const s = taskStore.stats
+  if (!s) return { running: 0, pending: 0, completed: 0, failed: 0 }
+  return {
+    running: s.tasks?.running ?? 0,
+    pending: s.tasks?.pending ?? 0,
+    completed: s.tasks?.completed ?? 0,
+    failed: s.tasks?.failed ?? 0
+  }
+})
 
 // 始终显示预览条（移除条件判断）
 const shouldShow = computed(() => true)

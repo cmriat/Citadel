@@ -1,5 +1,23 @@
 @import "tailwindcss";
 
+@theme {
+  --color-bg-primary: var(--bg-primary);
+  --color-bg-secondary: var(--bg-secondary);
+  --color-bg-tertiary: var(--bg-tertiary);
+  --color-bg-hover: var(--bg-hover);
+  --color-border: var(--border-color);
+  --color-border-light: var(--border-light);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+  --color-text-dim: var(--text-dim);
+  --color-accent: var(--accent-color);
+  --color-success: var(--color-success);
+  --color-warning: var(--color-warning);
+  --color-error: var(--color-error);
+  --color-info: var(--color-info);
+}
+
 :root {
   font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
@@ -13,19 +31,24 @@
 /* Dark theme variables */
 html.dark {
   color-scheme: dark;
-  --bg-primary: #0f0f0f;
-  --bg-secondary: #16162a;
-  --bg-tertiary: #1a1a2e;
-  --bg-hover: #252545;
-  --border-color: #2a2a4e;
-  --text-primary: #ffffff;
-  --text-secondary: rgba(255, 255, 255, 0.87);
-  --text-muted: #a0a0c0;
-  --text-dim: #6a6a8a;
+  --bg-primary: #0d1117;
+  --bg-secondary: #161b22;
+  --bg-tertiary: #21262d;
+  --bg-hover: #30363d;
+  --border-color: #30363d;
+  --border-light: #21262d;
+  --text-primary: #f0f6fc;
+  --text-secondary: #c9d1d9;
+  --text-muted: #8b949e;
+  --text-dim: #6e7681;
   --accent-color: #409eff;
-  --scrollbar-track: #1a1a2e;
-  --scrollbar-thumb: #4a4a6a;
-  --scrollbar-thumb-hover: #6a6a8a;
+  --color-success: #3fb950;
+  --color-warning: #d29922;
+  --color-error: #f85149;
+  --color-info: #58a6ff;
+  --scrollbar-track: #161b22;
+  --scrollbar-thumb: #484f58;
+  --scrollbar-thumb-hover: #6a7681;
 }
 
 /* Light theme variables */
@@ -90,41 +113,84 @@ html.dark .el-button--primary {
 }
 
 html.dark .el-card {
-  --el-card-bg-color: #1a1a2e;
-  --el-card-border-color: #2a2a4e;
+  --el-card-bg-color: #161b22;
+  --el-card-border-color: #30363d;
 }
 
 html.dark .el-table {
-  --el-table-bg-color: #1a1a2e;
-  --el-table-header-bg-color: #16162a;
-  --el-table-row-hover-bg-color: #252545;
-  --el-table-border-color: #2a2a4e;
-  --el-table-text-color: #fff;
+  --el-table-bg-color: #161b22;
+  --el-table-header-bg-color: #21262d;
+  --el-table-row-hover-bg-color: #30363d;
+  --el-table-border-color: #30363d;
+  --el-table-text-color: #f0f6fc;
 }
 
 html.dark .el-input__wrapper {
-  background-color: #1a1a2e;
-  box-shadow: 0 0 0 1px #2a2a4e inset;
+  background-color: #21262d;
+  box-shadow: 0 0 0 1px #30363d inset;
 }
 
 html.dark .el-input__inner {
-  color: #fff;
+  color: #f0f6fc;
 }
 
 html.dark .el-form-item__label {
-  color: #a0a0c0;
+  color: #c9d1d9;
 }
 
 html.dark .el-slider__runway {
-  background-color: #2a2a4e;
+  background-color: #30363d;
 }
 
 html.dark .el-button {
-  --el-button-bg-color: #252545;
-  --el-button-border-color: #2a2a4e;
-  --el-button-text-color: #fff;
-  --el-button-hover-bg-color: #353565;
-  --el-button-hover-border-color: #3a3a5e;
+  --el-button-bg-color: #21262d;
+  --el-button-border-color: #30363d;
+  --el-button-text-color: #c9d1d9;
+  --el-button-hover-bg-color: #30363d;
+  --el-button-hover-border-color: #484f58;
+}
+
+html.dark .el-select__wrapper {
+  background-color: #21262d;
+  box-shadow: 0 0 0 1px #30363d inset;
+}
+
+html.dark .el-select-dropdown {
+  background-color: #161b22;
+  border-color: #30363d;
+}
+
+html.dark .el-select-dropdown__item {
+  color: #c9d1d9;
+}
+
+html.dark .el-select-dropdown__item:hover {
+  background-color: #30363d;
+}
+
+html.dark .el-dialog {
+  --el-dialog-bg-color: #161b22;
+  --el-dialog-title-font-color: #f0f6fc;
+}
+
+html.dark .el-drawer {
+  background-color: #161b22;
+}
+
+html.dark .el-drawer__header {
+  color: #f0f6fc;
+}
+
+html.dark .el-message-box {
+  background-color: #161b22;
+}
+
+html.dark .el-message-box__title {
+  color: #f0f6fc;
+}
+
+html.dark .el-message-box__content {
+  color: #c9d1d9;
 }
 
 /* Element Plus light theme - use defaults mostly */

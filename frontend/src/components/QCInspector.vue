@@ -65,9 +65,9 @@ watch(() => props.episodes, (eps) => {
   let resumeCount = 0
 
   eps.forEach(ep => {
-    // 优先使用已有状态，其次使用 initialResult，最后默认 pending
-    if (qcStatus.value[ep.name]) {
-      newStatus[ep.name] = qcStatus.value[ep.name]
+    const existingStatus = qcStatus.value[ep.name]
+    if (existingStatus) {
+      newStatus[ep.name] = existingStatus
     } else if (props.initialResult) {
       if (props.initialResult.passed.includes(ep.name)) {
         newStatus[ep.name] = 'passed'
@@ -154,15 +154,17 @@ const autoNextPending = () => {
   const currentIdx = props.episodes.findIndex(e => e.name === currentEpisode.value)
   // 从当前位置往后找
   for (let i = currentIdx + 1; i < props.episodes.length; i++) {
-    if (qcStatus.value[props.episodes[i].name] === 'pending') {
-      currentEpisode.value = props.episodes[i].name
+    const ep = props.episodes[i]
+    if (ep && qcStatus.value[ep.name] === 'pending') {
+      currentEpisode.value = ep.name
       return
     }
   }
   // 从头找
   for (let i = 0; i < currentIdx; i++) {
-    if (qcStatus.value[props.episodes[i].name] === 'pending') {
-      currentEpisode.value = props.episodes[i].name
+    const ep = props.episodes[i]
+    if (ep && qcStatus.value[ep.name] === 'pending') {
+      currentEpisode.value = ep.name
       return
     }
   }
@@ -258,14 +260,20 @@ const handleKeyDown = (e: KeyboardEvent) => {
 const navigatePrev = () => {
   const idx = props.episodes.findIndex(e => e.name === currentEpisode.value)
   if (idx > 0) {
-    currentEpisode.value = props.episodes[idx - 1].name
+    const prevEp = props.episodes[idx - 1]
+    if (prevEp) {
+      currentEpisode.value = prevEp.name
+    }
   }
 }
 
 const navigateNext = () => {
   const idx = props.episodes.findIndex(e => e.name === currentEpisode.value)
-  if (idx < props.episodes.length - 1) {
-    currentEpisode.value = props.episodes[idx + 1].name
+  if (idx >= 0 && idx < props.episodes.length - 1) {
+    const nextEp = props.episodes[idx + 1]
+    if (nextEp) {
+      currentEpisode.value = nextEp.name
+    }
   }
 }
 

@@ -2,7 +2,7 @@ import axios from 'axios'
 import type { AxiosInstance, AxiosResponse } from 'axios'
 
 // 从环境变量读取配置，提供合理的默认值
-const API_TIMEOUT = parseInt(import.meta.env.VITE_API_TIMEOUT || '30000')
+const API_TIMEOUT = parseInt(import.meta.env.VITE_API_TIMEOUT || '120000')
 
 // API instance
 const api: AxiosInstance = axios.create({

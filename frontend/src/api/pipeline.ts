@@ -1,6 +1,22 @@
 import api from './index'
 import type { Task } from './index'
 
+// ============ API Response Types ============
+
+/** BOS 扫描响应 */
+interface ScanBosResponse {
+  ready: boolean
+  file_count: number
+  error?: string
+}
+
+/** 目录扫描响应 */
+interface ScanDirsResponse {
+  name: string
+}
+
+// ============ Pipeline Configuration ============
+
 // Unified pipeline configuration
 export interface PipelineConfig {
   bos_source: string      // BOS source path (download from)
@@ -34,17 +50,18 @@ export interface PipelineResult {
 export const resolvePath = (template: string): string => {
   const now = new Date()
 
-  // YYYY-MM-DD
   const date = now.toISOString().split('T')[0]
 
-  // YYYY-MM-DD_HH-mm
   const hours = now.getHours().toString().padStart(2, '0')
   const minutes = now.getMinutes().toString().padStart(2, '0')
   const datetime = `${date}_${hours}-${minutes}`
 
-  return template
-    .replace(/{date}/g, date)
-    .replace(/{datetime}/g, datetime)
+  if (!template) return ''
+
+  let result = template
+  result = result.split('{date}').join(date)
+  result = result.split('{datetime}').join(datetime)
+  return result
 }
 
 /**
@@ -116,7 +133,7 @@ export interface CheckResult {
 // Check if BOS source has HDF5 files (for download step)
 export const checkDownloadReady = async (bosPath: string): Promise<CheckResult> => {
   try {
-    const result = await api.get('/download/scan-bos', { params: { bos_path: bosPath } })
+    const result = await api.get<ScanBosResponse>('/download/scan-bos', { params: { bos_path: bosPath } })
     return {
       ready: result.ready,
       count: result.file_count,
@@ -131,13 +148,14 @@ export const checkDownloadReady = async (bosPath: string): Promise<CheckResult> 
 export const checkConvertReady = async (localDir: string): Promise<CheckResult> => {
   try {
     const rawDir = `${localDir}/raw`
-    const files: string[] = await api.get('/convert/scan-files', {
+    const files = await api.get<string[]>('/convert/scan-files', {
       params: { input_dir: rawDir, file_pattern: 'episode_*.h5' }
     })
+    const fileList = Array.isArray(files) ? files : []
     return {
-      ready: files.length > 0,
-      count: files.length,
-      message: files.length > 0 ? `${files.length} files` : 'No files'
+      ready: fileList.length > 0,
+      count: fileList.length,
+      message: fileList.length > 0 ? `${fileList.length} files` : 'No files'
     }
   } catch (e) {
     return { ready: false, count: 0, message: (e as Error).message }
@@ -149,14 +167,15 @@ export const checkUploadReady = async (localDir: string): Promise<CheckResult> =
   try {
     // 检查 merged 目录是否存在
     const mergedDir = `${localDir}/merged`
-    const dirs: Array<{ name: string }> = await api.get('/upload/scan-dirs', {
+    const dirs = await api.get<ScanDirsResponse[]>('/upload/scan-dirs', {
       params: { base_dir: mergedDir }
     })
+    const dirList = Array.isArray(dirs) ? dirs : []
     // merged 目录本身就是一个数据集，检查是否有 meta 目录
     return {
-      ready: dirs.length > 0,
-      count: dirs.length,
-      message: dirs.length > 0 ? 'Upload ready' : 'No merged data'
+      ready: dirList.length > 0,
+      count: dirList.length,
+      message: dirList.length > 0 ? 'Upload ready' : 'No merged data'
     }
   } catch (e) {
     return { ready: false, count: 0, message: (e as Error).message }
@@ -167,11 +186,10 @@ export const checkUploadReady = async (localDir: string): Promise<CheckResult> =
 export const checkMergedReady = async (localDir: string): Promise<CheckResult> => {
   try {
     const mergedDir = `${localDir}/merged`
-    // 检查 merged/meta 目录是否存在（LeRobot 格式标志）
-    const result = await api.get('/convert/scan-files', {
+    const result = await api.get<string[]>('/convert/scan-files', {
       params: { input_dir: `${mergedDir}/meta`, file_pattern: '*.json' }
     })
-    const files: string[] = result
+    const files = Array.isArray(result) ? result : []
     return {
       ready: files.length > 0,
       count: files.length,

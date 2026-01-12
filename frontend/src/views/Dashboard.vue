@@ -80,14 +80,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   console.log('[Dashboard] onUnmounted called - cleaning up')
-  // 强制停止轮询
   taskStore.stopPolling()
-
-  // 额外的安全措施：延迟清理确保所有异步操作完成
-  setTimeout(() => {
-    console.log('[Dashboard] Final cleanup')
-    taskStore.stopPolling()
-  }, 100)
 })
 </script>
 
@@ -130,7 +123,7 @@ onUnmounted(() => {
             <el-radio-button
               v-for="opt in statusOptions"
               :key="opt.value"
-              :value="opt.value"
+              :label="opt.value"
             >
               {{ opt.label }}
             </el-radio-button>
