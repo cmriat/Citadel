@@ -29,6 +29,7 @@ pydantic = ">=2.0.0"
 python-dotenv = ">=1.0.0"
 # WebSocket支持
 websockets = "*"
+scipy = ">=1.17.0,<2"
 
 [tasks]
 # =============================================================================
@@ -64,6 +65,10 @@ merge = "python -m cli.merge_cli"
 # 可视化工具 - 验证转换后的LeRobot数据
 # 示例: pixi run visualize /path/to/episode_0001
 visualize = "python scripts/visualize_parquet.py"
+
+# 筛选工具 - 筛选LeRobot数据集，去除不完整和异常的episode
+# 示例: pixi run filter /path/to/input /path/to/output --jump-threshold 0.2
+filter = "python scripts/filter_lerobot.py"
 
 # =============================================================================
 # 测试和开发工具

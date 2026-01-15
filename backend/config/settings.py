@@ -163,6 +163,11 @@ class Settings:
         """默认文件匹配模式"""
         return _get_env("DEFAULT_FILE_PATTERN", "episode_*.h5")
 
+    @property
+    def DEFAULT_ALIGNMENT_METHOD(self) -> str:
+        """默认关节对齐方法 (nearest=最近邻, linear=线性插值)"""
+        return _get_env("DEFAULT_ALIGNMENT_METHOD", "nearest")
+
     # =========================================================================
     # 业务默认值 - 向量维度
     # =========================================================================
@@ -306,6 +311,7 @@ class Settings:
             "DEFAULT_ROBOT_TYPE": self.DEFAULT_ROBOT_TYPE,
             "DEFAULT_TASK_NAME": self.DEFAULT_TASK_NAME,
             "DEFAULT_FILE_PATTERN": self.DEFAULT_FILE_PATTERN,
+            "DEFAULT_ALIGNMENT_METHOD": self.DEFAULT_ALIGNMENT_METHOD,
             "STATE_MAX_DIM": self.STATE_MAX_DIM,
             "ACTION_MAX_DIM": self.ACTION_MAX_DIM,
             # 超时

@@ -67,29 +67,58 @@ def reconstruct_joint_vector(hdf5_group, num_joints=6) -> np.ndarray:
     return np.column_stack(joints)
 
 
-def align_data_to_reference(ref_timestamps, data, data_timestamps, data_name):
-    """通用的时间对齐函数 (最近邻)
+def align_data_to_reference(ref_timestamps, data, data_timestamps, data_name, method='nearest'):
+    """通用的时间对齐函数
 
     Args:
         ref_timestamps: [N_ref] 参考时间戳
         data: [N_data, ...] 待对齐数据 (可以是图像或关节)
         data_timestamps: [N_data] 数据时间戳
         data_name: 数据名称 (用于日志)
+        method: 对齐方法 - 'nearest' (最近邻) 或 'linear' (线性插值)
 
     Returns:
         aligned_data: [N_ref, ...] 对齐后的数据
     """
-    aligned_indices = []
+    if method == 'nearest':
+        # 最近邻对齐（原方法）
+        aligned_indices = []
+        for ref_ts in ref_timestamps:
+            closest_idx = np.argmin(np.abs(data_timestamps - ref_ts))
+            aligned_indices.append(closest_idx)
+        aligned_data = data[aligned_indices]
 
-    for ref_ts in ref_timestamps:
-        closest_idx = np.argmin(np.abs(data_timestamps - ref_ts))
-        aligned_indices.append(closest_idx)
+    elif method == 'linear':
+        # 线性插值对齐
+        from scipy.interpolate import interp1d
 
-    aligned_data = data[aligned_indices]
+        # 对于多维数据，需要逐维度插值
+        if data.ndim == 1:
+            interp_func = interp1d(
+                data_timestamps, data,
+                kind='linear',
+                bounds_error=False,
+                fill_value=(data[0], data[-1])  # 边界使用首尾值
+            )
+            aligned_data = interp_func(ref_timestamps)
+        else:
+            # 多维数据：对每个维度分别插值
+            aligned_data = np.zeros((len(ref_timestamps),) + data.shape[1:], dtype=data.dtype)
+            for i in range(data.shape[1]):
+                interp_func = interp1d(
+                    data_timestamps, data[:, i],
+                    kind='linear',
+                    bounds_error=False,
+                    fill_value=(data[0, i], data[-1, i])
+                )
+                aligned_data[:, i] = interp_func(ref_timestamps)
+    else:
+        raise ValueError(f"Unknown alignment method: {method}. Supported: 'nearest', 'linear'")
 
-    # 计算对齐质量
-    time_errors = np.abs(data_timestamps[aligned_indices] - ref_timestamps)
-    print(f"  {data_name}: 平均误差={np.mean(time_errors)/1e6:.2f}ms, 最大误差={np.max(time_errors)/1e6:.2f}ms")
+    # 计算对齐质量（基于最近邻误差）
+    nearest_indices = [np.argmin(np.abs(data_timestamps - ts)) for ts in ref_timestamps]
+    time_errors = np.abs(data_timestamps[nearest_indices] - ref_timestamps)
+    print(f"  {data_name}: method={method}, 平均误差={np.mean(time_errors)/1e6:.2f}ms, 最大误差={np.max(time_errors)/1e6:.2f}ms")
 
     return aligned_data
 
@@ -125,13 +154,17 @@ def map_master_eef_to_slave_mapping(master_eef: np.ndarray, slave_mapping_stats:
     return mapped
 
 
-def load_episode_v1_format(ep_path: Path) -> Dict:
+def load_episode_v1_format(ep_path: Path, alignment_method: str = 'nearest') -> Dict:
     """加载online_test_hdf5_v1格式的Episode数据
 
     数据格式:
         images/cam_env/frames_jpeg - JPEG压缩图像
         joints/{left|right}_{master|slave}/joint{1-6}_pos
         joints/{left|right}_{master|slave}/eef_gripper_joint_pos
+
+    Args:
+        ep_path: HDF5文件路径
+        alignment_method: 对齐方法 - 'nearest' (最近邻) 或 'linear' (线性插值)
 
     Returns:
         {
@@ -153,9 +186,53 @@ def load_episode_v1_format(ep_path: Path) -> Dict:
         # 找到帧数最少的相机作为基准
         min_camera = min(cameras_info, key=lambda k: len(cameras_info[k]))
         reference_timestamps = cameras_info[min_camera]
-        N_frames = len(reference_timestamps)
+        N_frames_original = len(reference_timestamps)
 
-        print(f"\n⏱️  时间对齐基准: {min_camera} ({N_frames}帧)")
+        print(f"\n⏱️  时间对齐基准: {min_camera} ({N_frames_original}帧)")
+
+        # ========== 1.5 自适应边界裁剪 ==========
+        print("\n✂️  自适应边界裁剪:")
+
+        # 预读关节时间戳以计算边界
+        left_joint_sec_pre = f["joints/left_slave/timestamp_sec"][:]
+        left_joint_nsec_pre = f["joints/left_slave/timestamp_nanosec"][:]
+        joint_timestamps_preview = left_joint_sec_pre * 1e9 + left_joint_nsec_pre
+
+        # 计算头帧时延（图像相对于关节的固有延迟）
+        img_first_ts = reference_timestamps[0]
+        joint_nearest_idx = np.argmin(np.abs(joint_timestamps_preview - img_first_ts))
+        joint_nearest_ts = joint_timestamps_preview[joint_nearest_idx]
+        head_delay_ns = img_first_ts - joint_nearest_ts
+        head_delay_ms = head_delay_ns / 1e6
+
+        print(f"  头帧时延: {head_delay_ms:+.2f} ms (图像{'晚于' if head_delay_ns >= 0 else '早于'}关节)")
+
+        # 计算结束边界容忍阈值
+        joint_end_ts = joint_timestamps_preview[-1]
+        tolerance_end_ts = joint_end_ts + abs(head_delay_ns)  # 使用绝对值，确保容忍度为正
+
+        # 计算基准相机的有效帧掩码
+        valid_mask = reference_timestamps <= tolerance_end_ts
+
+        # 统计裁剪情况
+        trimmed_end = np.sum(reference_timestamps > tolerance_end_ts)
+
+        if trimmed_end > 0:
+            # 计算超出部分的时间
+            exceeded_frames = reference_timestamps[~valid_mask]
+            max_exceed_ms = (exceeded_frames[-1] - tolerance_end_ts) / 1e6 if len(exceeded_frames) > 0 else 0
+
+            print(f"  结束边界容忍: joint_end + {abs(head_delay_ms):.2f}ms")
+            print(f"  裁剪帧数: {trimmed_end} 帧 (超出容忍度 {max_exceed_ms:.2f}ms)")
+
+            # 裁剪基准相机的参考时间戳
+            reference_timestamps = reference_timestamps[valid_mask]
+            N_frames = len(reference_timestamps)
+            print(f"  保留帧数: {N_frames} / {N_frames_original}")
+        else:
+            N_frames = N_frames_original
+            valid_mask = None  # 无需裁剪
+            print(f"  无需裁剪，所有 {N_frames_original} 帧在容忍度内")
 
         # ========== 2. 解码并对齐图像 ==========
         print("\n📸 图像对齐:")
@@ -167,10 +244,15 @@ def load_episode_v1_format(ep_path: Path) -> Dict:
                 reference_timestamps,
                 images_env_raw,
                 cameras_info['cam_env'],
-                'cam_env'
+                'cam_env',
+                method='nearest'  # 图像对齐始终使用最近邻
             )
         else:
-            images_env = images_env_raw
+            # 基准相机：如果有裁剪，应用 valid_mask
+            if valid_mask is not None:
+                images_env = images_env_raw[valid_mask]
+            else:
+                images_env = images_env_raw
             print(f"  cam_env: 无需对齐 (基准相机)")
 
         # cam_left_wrist
@@ -180,10 +262,15 @@ def load_episode_v1_format(ep_path: Path) -> Dict:
                 reference_timestamps,
                 images_left_raw,
                 cameras_info['cam_left_wrist'],
-                'cam_left_wrist'
+                'cam_left_wrist',
+                method='nearest'  # 图像对齐始终使用最近邻
             )
         else:
-            images_left = images_left_raw
+            # 基准相机：如果有裁剪，应用 valid_mask
+            if valid_mask is not None:
+                images_left = images_left_raw[valid_mask]
+            else:
+                images_left = images_left_raw
             print(f"  cam_left_wrist: 无需对齐 (基准相机)")
 
         # cam_right_wrist
@@ -193,10 +280,15 @@ def load_episode_v1_format(ep_path: Path) -> Dict:
                 reference_timestamps,
                 images_right_raw,
                 cameras_info['cam_right_wrist'],
-                'cam_right_wrist'
+                'cam_right_wrist',
+                method='nearest'  # 图像对齐始终使用最近邻
             )
         else:
-            images_right = images_right_raw
+            # 基准相机：如果有裁剪，应用 valid_mask
+            if valid_mask is not None:
+                images_right = images_right_raw[valid_mask]
+            else:
+                images_right = images_right_raw
             print(f"  cam_right_wrist: 无需对齐 (基准相机)")
 
         # ========== 3. 读取关节数据 (slave) ==========
@@ -221,10 +313,10 @@ def load_episode_v1_format(ep_path: Path) -> Dict:
         right_joint_timestamps = right_joint_sec * 1e9 + right_joint_nsec
 
         # 3.5 对齐关节数据到基准时间戳（各自使用自己的时间戳）
-        left_joints = align_data_to_reference(reference_timestamps, left_joints_raw, left_joint_timestamps, 'left_joints')
-        left_gripper = align_data_to_reference(reference_timestamps, left_gripper_raw, left_joint_timestamps, 'left_gripper')
-        right_joints = align_data_to_reference(reference_timestamps, right_joints_raw, right_joint_timestamps, 'right_joints')
-        right_gripper = align_data_to_reference(reference_timestamps, right_gripper_raw, right_joint_timestamps, 'right_gripper')
+        left_joints = align_data_to_reference(reference_timestamps, left_joints_raw, left_joint_timestamps, 'left_joints', method=alignment_method)
+        left_gripper = align_data_to_reference(reference_timestamps, left_gripper_raw, left_joint_timestamps, 'left_gripper', method=alignment_method)
+        right_joints = align_data_to_reference(reference_timestamps, right_joints_raw, right_joint_timestamps, 'right_joints', method=alignment_method)
+        right_gripper = align_data_to_reference(reference_timestamps, right_gripper_raw, right_joint_timestamps, 'right_gripper', method=alignment_method)
 
         # ========== 4. 组装State (16维) ==========
         state = np.concatenate([
@@ -271,10 +363,10 @@ def load_episode_v1_format(ep_path: Path) -> Dict:
             right_cmd_timestamps = right_cmd_sec * 1e9 + right_cmd_nsec
 
             # 对齐到基准时间戳
-            left_joints_cmd = align_data_to_reference(reference_timestamps, left_joints_cmd_raw, left_cmd_timestamps, 'left_joints_cmd')
-            left_gripper_cmd_aligned = align_data_to_reference(reference_timestamps, left_gripper_cmd_raw, left_cmd_timestamps, 'left_gripper_cmd')
-            right_joints_cmd = align_data_to_reference(reference_timestamps, right_joints_cmd_raw, right_cmd_timestamps, 'right_joints_cmd')
-            right_gripper_cmd_aligned = align_data_to_reference(reference_timestamps, right_gripper_cmd_raw, right_cmd_timestamps, 'right_gripper_cmd')
+            left_joints_cmd = align_data_to_reference(reference_timestamps, left_joints_cmd_raw, left_cmd_timestamps, 'left_joints_cmd', method=alignment_method)
+            left_gripper_cmd_aligned = align_data_to_reference(reference_timestamps, left_gripper_cmd_raw, left_cmd_timestamps, 'left_gripper_cmd', method=alignment_method)
+            right_joints_cmd = align_data_to_reference(reference_timestamps, right_joints_cmd_raw, right_cmd_timestamps, 'right_joints_cmd', method=alignment_method)
+            right_gripper_cmd_aligned = align_data_to_reference(reference_timestamps, right_gripper_cmd_raw, right_cmd_timestamps, 'right_gripper_cmd', method=alignment_method)
 
             # 映射夹爪值到slave mapping范围
             left_gripper_cmd = map_master_eef_to_slave_mapping(left_gripper_cmd_aligned, left_mapping_stats)
@@ -630,20 +722,31 @@ def convert_hdf5_to_lerobot_v21(
     output_dir: Path,
     robot_type: str = "limx Tron2",
     fps: int = 30,
-    task: str = "Fold the laundry"
+    task: str = "Fold the laundry",
+    alignment_method: str = "nearest"
 ):
-    """Convert HDF5 episode to LeRobot v2.1 format."""
+    """Convert HDF5 episode to LeRobot v2.1 format.
+
+    Args:
+        hdf5_path: HDF5文件路径
+        output_dir: 输出目录
+        robot_type: 机器人类型
+        fps: 视频帧率
+        task: 任务描述
+        alignment_method: 对齐方法 - 'nearest' (最近邻) 或 'linear' (线性插值)
+    """
     dataset_name = output_dir.name
     print(f"Converting {hdf5_path} to LeRobot v2.1 format...")
     print(f"Output directory: {output_dir}")
     print(f"Dataset name: {dataset_name}")
+    print(f"Alignment method: {alignment_method}")
 
     # 1. Create output directory structure
     create_output_structure(output_dir)
 
     # 2. Load HDF5 data
     print("\nLoading HDF5 data...")
-    episode_data = load_episode_v1_format(hdf5_path)
+    episode_data = load_episode_v1_format(hdf5_path, alignment_method=alignment_method)
     num_frames = len(episode_data['state'])
     print(f"Loaded {num_frames} frames")
     print(f"  State shape: {episode_data['state'].shape}")
@@ -713,10 +816,20 @@ def main(
     output_dir: Path,
     robot_type: str = "limx Tron2",
     fps: int = 30,
-    task: str = "Fold the laundry"
+    task: str = "Fold the laundry",
+    alignment_method: str = "nearest"
 ):
-    """Main entry point."""
-    convert_hdf5_to_lerobot_v21(hdf5_path, output_dir, robot_type, fps, task)
+    """Main entry point.
+
+    Args:
+        hdf5_path: HDF5文件路径
+        output_dir: 输出目录
+        robot_type: 机器人类型
+        fps: 视频帧率
+        task: 任务描述
+        alignment_method: 关节对齐方法 - 'nearest' (最近邻) 或 'linear' (线性插值)
+    """
+    convert_hdf5_to_lerobot_v21(hdf5_path, output_dir, robot_type, fps, task, alignment_method)
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@ HDF5转换命令行工具
 
 使用示例:
     pixi run convert --input-dir "/path/to/hdf5/" --output-dir "/path/to/output/"
+    pixi run convert --alignment-method linear ...  # 使用线性插值
     pixi run convert --help
 
 环境变量:
@@ -11,6 +12,7 @@ HDF5转换命令行工具
     DEFAULT_TASK_NAME: 默认任务描述 (默认: Fold the laundry)
     DEFAULT_PARALLEL_JOBS: 默认并行任务数 (默认: 4)
     DEFAULT_FILE_PATTERN: 默认文件匹配模式 (默认: episode_*.h5)
+    DEFAULT_ALIGNMENT_METHOD: 默认对齐方法 (默认: nearest)
     TIMEOUT_CONVERT: 单文件转换超时秒数 (默认: 300)
 """
 
@@ -47,7 +49,8 @@ def convert_single_file(
     output_base_dir: Path,
     robot_type: str,
     fps: int,
-    task: str
+    task: str,
+    alignment_method: str
 ) -> Tuple[bool, str, float]:
     """转换单个HDF5文件
 
@@ -57,6 +60,7 @@ def convert_single_file(
         robot_type: 机器人类型
         fps: 帧率
         task: 任务描述
+        alignment_method: 对齐方法 ('nearest' 或 'linear')
 
     Returns:
         (是否成功, 错误信息, 耗时秒数)
@@ -72,7 +76,8 @@ def convert_single_file(
         "--output-dir", str(output_episode_dir),
         "--robot-type", robot_type,
         "--fps", str(fps),
-        "--task", task
+        "--task", task,
+        "--alignment-method", alignment_method
     ]
 
     try:
@@ -106,13 +111,14 @@ def convert_single_file(
 
 
 def convert(
-    input_dir: str,
-    output_dir: str,
+    input_dir: str = "/pfs/pfs-uaDOJM/home/maozan/data/1229_qz2/raw_fixed/",
+    output_dir: str = "/pfs/pfs-uaDOJM/home/maozan/data/1229_qz2/lerobot/",
     robot_type: Optional[str] = None,
     fps: Optional[int] = None,
     task: Optional[str] = None,
     parallel_jobs: Optional[int] = None,
-    file_pattern: Optional[str] = None
+    file_pattern: Optional[str] = None,
+    alignment_method: Optional[str] = "linear"
 ):
     """
     批量转换HDF5文件为LeRobot v2.1格式
@@ -125,6 +131,8 @@ def convert(
         task: 任务描述（默认从环境变量 DEFAULT_TASK_NAME 读取，或使用 'Fold the laundry'）
         parallel_jobs: 并发任务数（默认从环境变量 DEFAULT_PARALLEL_JOBS 读取，或使用 4）
         file_pattern: 文件匹配模式（默认从环境变量 DEFAULT_FILE_PATTERN 读取，或使用 'episode_*.h5'）
+        alignment_method: 关节对齐方法（默认从环境变量 DEFAULT_ALIGNMENT_METHOD 读取，或使用 'nearest'）
+                         可选值: 'nearest' (最近邻) 或 'linear' (线性插值)
     """
     # 从环境变量获取默认值
     if robot_type is None:
@@ -137,6 +145,9 @@ def convert(
         parallel_jobs = _get_env_int("DEFAULT_PARALLEL_JOBS", 4)
     if file_pattern is None:
         file_pattern = _get_env("DEFAULT_FILE_PATTERN", "episode_*.h5")
+    if alignment_method is None:
+        alignment_method = _get_env("DEFAULT_ALIGNMENT_METHOD", "nearest")
+
     print("=" * 80)
     print(colored("🔄 HDF5批量转换工具 - Citadel Release", "cyan", attrs=["bold"]))
     print("=" * 80)
@@ -147,6 +158,7 @@ def convert(
     print(f"任务: {task}")
     print(f"并发数: {parallel_jobs}")
     print(f"文件模式: {file_pattern}")
+    print(f"对齐方法: {alignment_method}")
     print("=" * 80)
 
     # 1. 扫描HDF5文件
@@ -187,7 +199,8 @@ def convert(
                 output_path,
                 robot_type,
                 fps,
-                task
+                task,
+                alignment_method
             ): hdf5_file
             for hdf5_file in hdf5_files
         }

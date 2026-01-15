@@ -30,6 +30,7 @@ from pathlib import Path
 from termcolor import colored
 import sys
 import os
+import glob as glob_module
 
 # 添加项目根目录到路径，以便导入scripts模块
 project_root = Path(__file__).parent.parent
@@ -39,8 +40,8 @@ from scripts.merge_lerobot import merge_datasets
 
 
 def merge(
-    sources: list[str],
-    output: str,
+    sources: list[str] = ["/pfs/pfs-uaDOJM/home/maozan/data/1229_qz2/lerobot_linear/episode_*"],
+    output: str = "/pfs/pfs-uaDOJM/home/maozan/data/1229_qz2/merged_linear/",
     state_max_dim: int = 14,
     action_max_dim: int = 14,
     fps: int = 25,
@@ -50,18 +51,35 @@ def merge(
     合并多个LeRobot数据集为一个整体数据集
 
     Args:
-        sources: 源数据集文件夹路径列表（必须是LeRobot v2.1格式）
+        sources: 源数据集路径列表，支持多个路径或单个 glob 模式（如 /path/to/episode_*）
         output: 输出合并数据集的文件夹路径
         state_max_dim: 状态向量的最大维度（默认14）
         action_max_dim: 动作向量的最大维度（默认14）
         fps: 视频帧率（默认25）
         copy_images: 是否复制图像文件（默认False，仅复制视频）
     """
+    # 展开 glob 模式（处理通配符路径）
+    source_list = []
+    for src in sources:
+        if '*' in src or '?' in src or '[' in src:
+            # 包含通配符，进行 glob 展开
+            matched = sorted(glob_module.glob(src))
+            if matched:
+                source_list.extend(matched)
+            else:
+                print(colored(f"⚠️  警告: 模式 '{src}' 没有匹配到任何路径", "yellow"))
+        else:
+            source_list.append(src)
+
+    if not source_list:
+        print(colored("❌ 没有有效的源数据集路径", "red", attrs=["bold"]))
+        return
+
     print("=" * 80)
     print(colored("🔀 LeRobot数据集合并工具 - Citadel Release", "cyan", attrs=["bold"]))
     print("=" * 80)
-    print(f"源数据集数量: {len(sources)}")
-    for i, src in enumerate(sources, 1):
+    print(f"源数据集数量: {len(source_list)}")
+    for i, src in enumerate(source_list, 1):
         print(f"  {i}. {src}")
     print(f"输出路径: {output}")
     print(f"状态向量最大维度: {state_max_dim}")
@@ -73,7 +91,7 @@ def merge(
     # 验证源路径
     print("\n📁 验证源数据集...")
     invalid_sources = []
-    for src in sources:
+    for src in source_list:
         src_path = Path(src)
         if not src_path.exists():
             print(colored(f"  ✗ {src} - 路径不存在", "red"))
@@ -114,7 +132,7 @@ def merge(
         merge_module.args = args
 
         merge_datasets(
-            source_folders=sources,
+            source_folders=source_list,
             output_folder=output,
             validate_ts=False,
             tolerance_s=1e-4,
