@@ -1,17 +1,38 @@
 import axios from 'axios'
-import type { AxiosInstance, AxiosResponse } from 'axios'
+import type { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios'
 
 // 从环境变量读取配置，提供合理的默认值
 const API_TIMEOUT = parseInt(import.meta.env.VITE_API_TIMEOUT || '120000')
 
+type ApiInstance = Omit<
+  AxiosInstance,
+  | 'request'
+  | 'get'
+  | 'delete'
+  | 'head'
+  | 'options'
+  | 'post'
+  | 'put'
+  | 'patch'
+> & {
+  request<T = any, D = any>(config: AxiosRequestConfig<D>): Promise<T>
+  get<T = any, D = any>(url: string, config?: AxiosRequestConfig<D>): Promise<T>
+  delete<T = any, D = any>(url: string, config?: AxiosRequestConfig<D>): Promise<T>
+  head<T = any, D = any>(url: string, config?: AxiosRequestConfig<D>): Promise<T>
+  options<T = any, D = any>(url: string, config?: AxiosRequestConfig<D>): Promise<T>
+  post<T = any, D = any>(url: string, data?: D, config?: AxiosRequestConfig<D>): Promise<T>
+  put<T = any, D = any>(url: string, data?: D, config?: AxiosRequestConfig<D>): Promise<T>
+  patch<T = any, D = any>(url: string, data?: D, config?: AxiosRequestConfig<D>): Promise<T>
+}
+
 // API instance
-const api: AxiosInstance = axios.create({
+const api = axios.create({
   baseURL: '/api',
   timeout: API_TIMEOUT,
   headers: {
     'Content-Type': 'application/json'
   }
-})
+}) as ApiInstance
 
 // Response interceptor
 api.interceptors.response.use(

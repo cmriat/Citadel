@@ -71,12 +71,20 @@ const config = reactive<PipelineConfig>(loadConfig())
 const loading = ref<'download' | 'convert' | 'upload' | 'qc' | 'merge' | null>(null)
 const paths = computed(() => derivePaths(config))
 
+// 解析本地目录模板（用于 QC/merge 等需要实际路径的场景）
+const resolvedLocalDir = computed(() => resolvePath(config.local_dir))
+const currentLerobotDir = computed(() => `${resolvedLocalDir.value}/lerobot`)
+
 // ============ QC + Merge State ============
 const showQCInspector = ref(false)
 const qcEpisodes = ref<Episode[]>([])
 const qcLoading = ref(false)
 const qcResult = ref<QCResult | null>(null)
 const mergeTaskId = ref<string | null>(null)
+
+// 当前已同步过 QC 结果的目录（用于避免重复 toast）
+const lastSyncedQCLerobotDir = ref<string | null>(null)
+let qcResultSyncTimer: ReturnType<typeof setTimeout> | null = null
 
 // Merge episode selection
 const showMergeSelector = ref(false)
@@ -226,10 +234,15 @@ const handleUpload = async () => {
 // ============ QC Inspector ============
 const openQCInspector = async () => {
   qcLoading.value = true
+  qcEpisodes.value = []
   showQCInspector.value = true
   try {
-    const resolvedDir = resolvePath(config.local_dir)
+    const resolvedDir = resolvedLocalDir.value
     console.log('[openQCInspector] resolvedDir:', resolvedDir)
+
+    // 打开 QC 前强制同步，避免使用内存中的旧结果
+    await syncQCResultForCurrentDir({ showToast: false, force: true })
+
     const result = await scanEpisodes(resolvedDir)
     console.log('[openQCInspector] episodes count:', result?.length)
     qcEpisodes.value = result
@@ -247,9 +260,9 @@ const handleQCConfirm = async (result: QCResult) => {
 
   // 保存 QC 结果到文件
   try {
-    const resolvedDir = resolvePath(config.local_dir)
-    const lerobotDir = `${resolvedDir}/lerobot`
+    const lerobotDir = currentLerobotDir.value
     await saveQCResult(lerobotDir, result)
+    lastSyncedQCLerobotDir.value = lerobotDir
     console.log('[handleQCConfirm] QC result saved to file')
   } catch (e) {
     console.error('[handleQCConfirm] Failed to save QC result:', e)
@@ -340,11 +353,25 @@ const qcStats = computed(() => {
   }
 })
 
-// 加载上次的 QC 结果
-const loadPreviousQCResult = async () => {
+const syncQCResultForCurrentDir = async (opts?: { showToast?: boolean; force?: boolean }) => {
+  const showToast = opts?.showToast ?? false
+  const force = opts?.force ?? false
+  const lerobotDir = currentLerobotDir.value
+
+  // 切换数据目录时，清空旧结果，避免把 A 数据集的 QC 结果带到 B 数据集
+  if (lastSyncedQCLerobotDir.value && lastSyncedQCLerobotDir.value !== lerobotDir) {
+    qcResult.value = null
+    lastSyncedQCLerobotDir.value = null
+  }
+
   try {
-    const resolvedDir = resolvePath(config.local_dir)
-    const lerobotDir = `${resolvedDir}/lerobot`
+    if (!force) {
+      // 避免同一个目录重复同步导致反复提示
+      if (lastSyncedQCLerobotDir.value === lerobotDir && qcResult.value) {
+        return
+      }
+    }
+
     const result = await loadQCResult(lerobotDir)
 
     if (result.exists && (result.passed.length > 0 || result.failed.length > 0)) {
@@ -352,15 +379,29 @@ const loadPreviousQCResult = async () => {
         passed: result.passed,
         failed: result.failed
       }
-      console.log('[loadPreviousQCResult] Loaded QC result:', result)
-      if (result.timestamp) {
-        const time = new Date(result.timestamp).toLocaleString()
-        ElMessage.info(`已加载上次质检结果 (${time}): ${result.passed.length} 通过, ${result.failed.length} 不通过`)
+      lastSyncedQCLerobotDir.value = lerobotDir
+      console.log('[syncQCResultForCurrentDir] Loaded QC result:', result)
+
+      if (showToast) {
+        if (result.timestamp) {
+          const time = new Date(result.timestamp).toLocaleString()
+          ElMessage.info(`已同步质检结果 (${time}): ${result.passed.length} 通过, ${result.failed.length} 不通过`)
+        } else {
+          ElMessage.info(`已同步质检结果: ${result.passed.length} 通过, ${result.failed.length} 不通过`)
+        }
       }
+    } else {
+      qcResult.value = null
+      lastSyncedQCLerobotDir.value = null
     }
   } catch (e) {
-    console.error('[loadPreviousQCResult] Failed to load QC result:', e)
+    console.error('[syncQCResultForCurrentDir] Failed to load QC result:', e)
   }
+}
+
+// 加载上次的 QC 结果（兼容旧命名）
+const loadPreviousQCResult = async () => {
+  await syncQCResultForCurrentDir({ showToast: true })
 }
 
 // Auto-check on mount and start task polling
@@ -388,9 +429,24 @@ onMounted(async () => {
   taskStore.fetchTasks()
   taskStore.fetchStats()
   taskStore.startPolling(3000)
-  // 4. Load previous QC result
+  // 4. Load previous QC result (for current local_dir)
   setTimeout(loadPreviousQCResult, 600)
 })
+
+// local_dir 变化时自动同步 qc_result.json（支持跨机器/重复打开同一数据集）
+watch(
+  () => currentLerobotDir.value,
+  () => {
+    if (qcResultSyncTimer) {
+      clearTimeout(qcResultSyncTimer)
+      qcResultSyncTimer = null
+    }
+    qcResultSyncTimer = setTimeout(() => {
+      syncQCResultForCurrentDir({ showToast: true })
+    }, 300)
+  },
+  { immediate: true }
+)
 
 onUnmounted(() => {
   taskStore.stopPolling()

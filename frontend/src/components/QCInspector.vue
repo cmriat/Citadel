@@ -48,7 +48,6 @@ const visible = computed({
 // QC 状态: 'passed' | 'failed' | 'pending'
 const qcStatus = ref<Record<string, 'passed' | 'failed' | 'pending'>>({})
 const currentEpisode = ref<string | null>(null)
-const videoRef = ref<HTMLVideoElement | null>(null)
 const hasShownResumeHint = ref(false)
 
 // 相机切换
@@ -59,54 +58,84 @@ const cameras = [
 ]
 const currentCamera = ref('cam_env')
 
-// 初始化 QC 状态
-watch(() => props.episodes, (eps) => {
-  const newStatus: Record<string, 'passed' | 'failed' | 'pending'> = {}
-  let resumeCount = 0
+const resetQCState = () => {
+  qcStatus.value = {}
+  currentEpisode.value = null
+  currentCamera.value = 'cam_env'
+  hasShownResumeHint.value = false
+}
 
-  eps.forEach(ep => {
-    const existingStatus = qcStatus.value[ep.name]
-    if (existingStatus) {
-      newStatus[ep.name] = existingStatus
-    } else if (props.initialResult) {
-      if (props.initialResult.passed.includes(ep.name)) {
+const activeBaseDir = ref<string | null>(null)
+
+watch(visible, (val) => {
+  if (!val) {
+    activeBaseDir.value = null
+    resetQCState()
+    return
+  }
+
+  activeBaseDir.value = props.baseDir
+  resetQCState()
+})
+
+// 初始化 QC 状态（episodes / initialResult 可能异步到达）
+watch(
+  [() => props.episodes, () => props.initialResult, () => props.baseDir, () => visible.value],
+  ([eps, initialResult, baseDir, isVisible]) => {
+    if (!isVisible) return
+
+    if (activeBaseDir.value !== baseDir) {
+      activeBaseDir.value = baseDir
+      resetQCState()
+    }
+
+    const newStatus: Record<string, 'passed' | 'failed' | 'pending'> = {}
+    let resumeCount = 0
+
+    eps.forEach(ep => {
+      const existingStatus = qcStatus.value[ep.name]
+
+      if (existingStatus && existingStatus !== 'pending') {
+        newStatus[ep.name] = existingStatus
+        resumeCount++
+        return
+      }
+
+      if (initialResult?.passed.includes(ep.name)) {
         newStatus[ep.name] = 'passed'
         resumeCount++
-      } else if (props.initialResult.failed.includes(ep.name)) {
+      } else if (initialResult?.failed.includes(ep.name)) {
         newStatus[ep.name] = 'failed'
         resumeCount++
       } else {
         newStatus[ep.name] = 'pending'
       }
-    } else {
-      newStatus[ep.name] = 'pending'
+    })
+
+    qcStatus.value = newStatus
+
+    if (resumeCount > 0 && !hasShownResumeHint.value && eps.length > 0) {
+      hasShownResumeHint.value = true
+      const pendingEpisodes = eps.filter(ep => newStatus[ep.name] === 'pending')
+      const firstPending = pendingEpisodes[0]
+
+      if (firstPending) {
+        currentEpisode.value = firstPending.name
+        ElMessage.info({
+          message: `已恢复上次进度: ${resumeCount} 个已标记，从 ${firstPending.name} 继续`,
+          duration: 4000
+        })
+      } else {
+        currentEpisode.value = eps[0]?.name || null
+        ElMessage.success({
+          message: `所有 ${resumeCount} 个 episode 已标记完成`,
+          duration: 3000
+        })
+      }
     }
-  })
-
-  qcStatus.value = newStatus
-
-  // 显示恢复提示并自动定位到第一个待检查的 episode
-  if (resumeCount > 0 && !hasShownResumeHint.value && eps.length > 0) {
-    hasShownResumeHint.value = true
-    const pendingEpisodes = eps.filter(ep => newStatus[ep.name] === 'pending')
-    const firstPending = pendingEpisodes[0]
-
-    if (firstPending) {
-      currentEpisode.value = firstPending.name
-      ElMessage.info({
-        message: `已恢复上次进度: ${resumeCount} 个已标记，从 ${firstPending.name} 继续`,
-        duration: 4000
-      })
-    } else {
-      // 所有都已标记，定位到第一个
-      currentEpisode.value = eps[0]?.name || null
-      ElMessage.success({
-        message: `所有 ${resumeCount} 个 episode 已标记完成`,
-        duration: 3000
-      })
-    }
-  }
-}, { immediate: true })
+  },
+  { immediate: true }
+)
 
 // 统计
 const stats = computed(() => {
@@ -278,13 +307,7 @@ const navigateNext = () => {
 }
 
 const toggleVideoPlay = () => {
-  if (videoRef.value) {
-    if (videoRef.value.paused) {
-      videoRef.value.play()
-    } else {
-      videoRef.value.pause()
-    }
-  }
+  // 三路视频并排后不再支持单一 videoRef 控制，保留空实现以兼容快捷键分支
 }
 
 onMounted(() => {
@@ -295,12 +318,6 @@ onUnmounted(() => {
   window.removeEventListener('keydown', handleKeyDown)
 })
 
-// 关闭时重置提示状态
-watch(visible, (val) => {
-  if (!val) {
-    hasShownResumeHint.value = false
-  }
-})
 </script>
 
 <template>
