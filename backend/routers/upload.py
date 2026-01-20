@@ -4,12 +4,13 @@
 
 import asyncio
 import json
+from email.utils import parsedate
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Literal
 
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 
 from backend.models.task import CreateUploadTaskRequest, TaskResponse
@@ -17,6 +18,44 @@ from backend.services.upload_service import get_upload_service
 from backend.routers.tasks import task_to_response
 
 router = APIRouter(prefix="/api/upload", tags=["upload"])
+
+
+_NOT_MODIFIED_HEADERS = {
+    # 与 Starlette NotModifiedResponse 行为对齐（仅保留缓存相关 header）
+    "cache-control",
+    "content-location",
+    "date",
+    "etag",
+    "expires",
+    "vary",
+}
+
+
+def _is_not_modified(etag: str, last_modified: str, request: Request) -> bool:
+    """判断请求是否可用 304 Not Modified。"""
+
+    if_none_match = request.headers.get("if-none-match")
+    if if_none_match:
+        if if_none_match.strip() == "*":
+            return True
+
+        # 兼容 `W/"..."` 形式
+        for part in if_none_match.split(","):
+            tag = part.strip()
+            if tag.startswith("W/"):
+                tag = tag[2:].strip()
+            if tag == etag:
+                return True
+        return False
+
+    if_modified_since = request.headers.get("if-modified-since")
+    if if_modified_since:
+        ims = parsedate(if_modified_since)
+        lm = parsedate(last_modified)
+        if ims is not None and lm is not None and ims >= lm:
+            return True
+
+    return False
 
 
 # ============ QC Result Models ============
@@ -136,7 +175,9 @@ async def scan_episodes(
 
 
 @router.get("/video-stream")
-async def get_video_stream(base_dir: str, episode_name: str, camera: str = "cam_env"):
+async def get_video_stream(
+    request: Request, base_dir: str, episode_name: str, camera: str = "cam_env"
+):
     """
     获取 episode 的视频流用于播放
 
@@ -158,11 +199,28 @@ async def get_video_stream(base_dir: str, episode_name: str, camera: str = "cam_
             status_code=404, detail=f"视频文件不存在: {episode_name}/{camera}"
         )
 
-    return FileResponse(
+    stat_result = Path(video_path).stat()
+    resp = FileResponse(
         video_path,
         media_type="video/mp4",
-        headers={"Accept-Ranges": "bytes", "Cache-Control": "public, max-age=3600"},
+        stat_result=stat_result,
+        content_disposition_type="inline",
+        headers={"Cache-Control": "public, max-age=3600"},
     )
+
+    # 对非 Range 请求支持 304，让浏览器重复打开同一视频时尽量复用缓存。
+    if request.headers.get("range") is None:
+        etag = resp.headers.get("etag")
+        last_modified = resp.headers.get("last-modified")
+        if etag and last_modified and _is_not_modified(etag, last_modified, request):
+            headers = {
+                k: v
+                for k, v in resp.headers.items()
+                if k.lower() in _NOT_MODIFIED_HEADERS
+            }
+            return Response(status_code=304, headers=headers)
+
+    return resp
 
 
 # ============ QC Result Persistence / Broadcast ============

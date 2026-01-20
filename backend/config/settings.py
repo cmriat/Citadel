@@ -231,6 +231,17 @@ class Settings:
         return _get_env_int("JPEG_QUALITY", 70)
 
     @property
+    def THUMBNAIL_CACHE_DIR(self) -> str:
+        """视频缩略图缓存目录（用于加速 scan-episodes/QC 打开）"""
+        default = str(Path(self.DB_PATH).expanduser().parent / "cache" / "thumbnails")
+        return _get_env("THUMBNAIL_CACHE_DIR", default)
+
+    @property
+    def THUMBNAIL_CACHE_MAX_ITEMS(self) -> int:
+        """缩略图内存缓存最大条目数（LRU）"""
+        return _get_env_int("THUMBNAIL_CACHE_MAX_ITEMS", 512)
+
+    @property
     def DEBUG(self) -> bool:
         """调试模式"""
         return _get_env_bool("DEBUG", False)
@@ -324,6 +335,8 @@ class Settings:
             # 其他
             "TASK_CLEANUP_DAYS": self.TASK_CLEANUP_DAYS,
             "JPEG_QUALITY": self.JPEG_QUALITY,
+            "THUMBNAIL_CACHE_DIR": self.THUMBNAIL_CACHE_DIR,
+            "THUMBNAIL_CACHE_MAX_ITEMS": self.THUMBNAIL_CACHE_MAX_ITEMS,
             "DEBUG": self.DEBUG,
         }
 
