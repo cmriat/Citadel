@@ -4,12 +4,12 @@ import { Icon } from '@iconify/vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useThemeStore } from '@/stores/theme'
 import { useTaskStore } from '@/stores/tasks'
-import { getDefaults, type DefaultConfig } from '@/api'
+import { getDefaults, type DefaultConfig, ApiError } from '@/api'
 import {
   runStep, derivePaths, hasPathTemplate, resolvePath,
   checkDownloadReady, checkConvertReady, checkMergedReady,
   scanEpisodes, runMerge, getMergeProgress,
-  saveQCResult, loadQCResult, uploadMerged
+  saveQCResult, loadQCResult, uploadMerged, updateQCEpisode
 } from '@/api/pipeline'
 import type { PipelineConfig, CheckResult, Episode, QCResult, MergeConfig, QCResultResponse } from '@/api/pipeline'
 import ValidatedInput from '@/components/ValidatedInput.vue'
@@ -80,7 +80,28 @@ const showQCInspector = ref(false)
 const qcEpisodes = ref<Episode[]>([])
 const qcLoading = ref(false)
 const qcResult = ref<QCResult | null>(null)
+const qcResultTimestamp = ref<string | null>(null)
 const mergeTaskId = ref<string | null>(null)
+
+const qcClientId = (() => {
+  const key = 'citadel_qc_client_id'
+  try {
+    const existing = sessionStorage.getItem(key)
+    if (existing) return existing
+    const created = `web-${Date.now()}-${Math.random().toString(16).slice(2)}`
+    sessionStorage.setItem(key, created)
+    return created
+  } catch {
+    return `web-${Date.now()}-${Math.random().toString(16).slice(2)}`
+  }
+})()
+
+let qcWs: WebSocket | null = null
+let qcWsHeartbeatTimer: ReturnType<typeof setInterval> | null = null
+let qcWsReconnectTimer: ReturnType<typeof setTimeout> | null = null
+let qcWsOpenTimer: ReturnType<typeof setTimeout> | null = null
+let qcWsReconnectAttempts = 0
+let qcWsBaseDir: string | null = null
 
 // 当前已同步过 QC 结果的目录（用于避免重复 toast）
 const lastSyncedQCLerobotDir = ref<string | null>(null)
@@ -240,7 +261,6 @@ const openQCInspector = async () => {
     const resolvedDir = resolvedLocalDir.value
     console.log('[openQCInspector] resolvedDir:', resolvedDir)
 
-    // 打开 QC 前强制同步，避免使用内存中的旧结果
     await syncQCResultForCurrentDir({ showToast: false, force: true })
 
     const result = await scanEpisodes(resolvedDir)
@@ -248,8 +268,76 @@ const openQCInspector = async () => {
     qcEpisodes.value = result
   } catch (e) {
     ElMessage.error(`扫描 episode 失败: ${(e as Error).message}`)
+    showQCInspector.value = false
   } finally {
     qcLoading.value = false
+  }
+}
+
+const updateLocalEpisodeStatus = (episodeName: string, status: 'passed' | 'failed' | 'pending') => {
+  if (!qcResult.value) {
+    qcResult.value = { passed: [], failed: [] }
+  }
+
+  const passed = new Set(qcResult.value.passed)
+  const failed = new Set(qcResult.value.failed)
+
+  passed.delete(episodeName)
+  failed.delete(episodeName)
+
+  if (status === 'passed') passed.add(episodeName)
+  if (status === 'failed') failed.add(episodeName)
+
+  qcResult.value = { passed: Array.from(passed), failed: Array.from(failed) }
+}
+
+const handleEpisodeUpdate = async (payload: { episodeName: string; status: 'passed' | 'failed' | 'pending' }) => {
+  updateLocalEpisodeStatus(payload.episodeName, payload.status)
+
+  try {
+    const lerobotDir = currentLerobotDir.value
+    const res = await updateQCEpisode(lerobotDir, payload.episodeName, payload.status, {
+      client_id: qcClientId,
+      base_timestamp: qcResultTimestamp.value ?? undefined,
+    })
+    qcResultTimestamp.value = res.timestamp ?? qcResultTimestamp.value
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 409) {
+      const current = (e.data as any)?.current
+      const time = current?.timestamp ? new Date(current.timestamp).toLocaleString() : ''
+      try {
+        await ElMessageBox.confirm(
+          `质检结果已更新${time ? ` (${time})` : ''}，是否覆盖当前标记？`,
+          '覆盖确认',
+          {
+            confirmButtonText: '覆盖',
+            cancelButtonText: '取消',
+            type: 'warning',
+          }
+        )
+      } catch {
+        await syncQCResultForCurrentDir({ showToast: true, force: true })
+        return
+      }
+
+      try {
+        const lerobotDir = currentLerobotDir.value
+        const res = await updateQCEpisode(lerobotDir, payload.episodeName, payload.status, {
+          client_id: qcClientId,
+          base_timestamp: qcResultTimestamp.value ?? undefined,
+          force: true,
+        })
+        qcResultTimestamp.value = res.timestamp ?? qcResultTimestamp.value
+        ElMessage.success('已覆盖更新')
+        return
+      } catch (e2) {
+        ElMessage.error(`覆盖更新失败: ${(e2 as Error).message}`)
+        return
+      }
+    }
+
+    ElMessage.warning(`更新质检状态失败: ${(e as Error).message}`)
+    await syncQCResultForCurrentDir({ showToast: false, force: true })
   }
 }
 
@@ -258,14 +346,50 @@ const handleQCConfirm = async (result: QCResult) => {
   ElMessage.success(`质检完成: ${result.passed.length} 通过, ${result.failed.length} 不通过`)
   showQCInspector.value = false
 
-  // 保存 QC 结果到文件
   try {
     const lerobotDir = currentLerobotDir.value
-    await saveQCResult(lerobotDir, result)
+    const baseTs = qcResultTimestamp.value ?? undefined
+    const res = await saveQCResult(lerobotDir, result, { client_id: qcClientId, base_timestamp: baseTs })
     lastSyncedQCLerobotDir.value = lerobotDir
+    qcResultTimestamp.value = res.timestamp ?? qcResultTimestamp.value
     console.log('[handleQCConfirm] QC result saved to file')
   } catch (e) {
     console.error('[handleQCConfirm] Failed to save QC result:', e)
+
+    if (e instanceof ApiError && e.status === 409) {
+      const current = (e.data as any)?.current
+      const time = current?.timestamp ? new Date(current.timestamp).toLocaleString() : ''
+      try {
+        await ElMessageBox.confirm(
+          `已存在质检结果${time ? ` (${time})` : ''}，是否覆盖保存？`,
+          '覆盖确认',
+          {
+            confirmButtonText: '覆盖保存',
+            cancelButtonText: '取消',
+            type: 'warning',
+          }
+        )
+      } catch {
+        return
+      }
+
+      try {
+        const lerobotDir = currentLerobotDir.value
+        const res = await saveQCResult(lerobotDir, result, {
+          client_id: qcClientId,
+          base_timestamp: qcResultTimestamp.value ?? undefined,
+          force: true,
+        })
+        lastSyncedQCLerobotDir.value = lerobotDir
+        qcResultTimestamp.value = res.timestamp ?? qcResultTimestamp.value
+        ElMessage.success('已覆盖保存质检结果')
+        return
+      } catch (e2) {
+        ElMessage.error(`覆盖保存失败: ${(e2 as Error).message}`)
+        return
+      }
+    }
+
     ElMessage.warning(`质检结果保存失败: ${(e as Error).message}`)
   }
 }
@@ -358,15 +482,14 @@ const syncQCResultForCurrentDir = async (opts?: { showToast?: boolean; force?: b
   const force = opts?.force ?? false
   const lerobotDir = currentLerobotDir.value
 
-  // 切换数据目录时，清空旧结果，避免把 A 数据集的 QC 结果带到 B 数据集
   if (lastSyncedQCLerobotDir.value && lastSyncedQCLerobotDir.value !== lerobotDir) {
     qcResult.value = null
+    qcResultTimestamp.value = null
     lastSyncedQCLerobotDir.value = null
   }
 
   try {
     if (!force) {
-      // 避免同一个目录重复同步导致反复提示
       if (lastSyncedQCLerobotDir.value === lerobotDir && qcResult.value) {
         return
       }
@@ -379,6 +502,7 @@ const syncQCResultForCurrentDir = async (opts?: { showToast?: boolean; force?: b
         passed: result.passed,
         failed: result.failed
       }
+      qcResultTimestamp.value = result.timestamp ?? null
       lastSyncedQCLerobotDir.value = lerobotDir
       console.log('[syncQCResultForCurrentDir] Loaded QC result:', result)
 
@@ -392,6 +516,7 @@ const syncQCResultForCurrentDir = async (opts?: { showToast?: boolean; force?: b
       }
     } else {
       qcResult.value = null
+      qcResultTimestamp.value = null
       lastSyncedQCLerobotDir.value = null
     }
   } catch (e) {
@@ -403,6 +528,151 @@ const syncQCResultForCurrentDir = async (opts?: { showToast?: boolean; force?: b
 const loadPreviousQCResult = async () => {
   await syncQCResultForCurrentDir({ showToast: true })
 }
+
+const closeQCWebSocket = () => {
+  if (qcWsOpenTimer) {
+    clearTimeout(qcWsOpenTimer)
+    qcWsOpenTimer = null
+  }
+  if (qcWsReconnectTimer) {
+    clearTimeout(qcWsReconnectTimer)
+    qcWsReconnectTimer = null
+  }
+  if (qcWsHeartbeatTimer) {
+    clearInterval(qcWsHeartbeatTimer)
+    qcWsHeartbeatTimer = null
+  }
+
+  qcWsReconnectAttempts = 0
+  qcWsBaseDir = null
+
+  if (qcWs) {
+    try {
+      qcWs.onclose = null
+      qcWs.onerror = null
+      qcWs.onmessage = null
+      qcWs.onopen = null
+      qcWs.close()
+    } catch {
+      // ignore
+    }
+    qcWs = null
+  }
+}
+
+const scheduleQCWebSocketReconnect = (baseDir: string) => {
+  if (!baseDir) return
+  if (qcWsReconnectTimer) return
+
+  qcWsReconnectAttempts += 1
+  const delay = Math.min(1000 * 2 ** (qcWsReconnectAttempts - 1), 15000)
+
+  qcWsReconnectTimer = setTimeout(() => {
+    qcWsReconnectTimer = null
+    openQCWebSocket(baseDir)
+  }, delay)
+}
+
+const openQCWebSocket = (baseDir: string) => {
+  if (!baseDir) return
+
+  if (qcWsOpenTimer) {
+    clearTimeout(qcWsOpenTimer)
+    qcWsOpenTimer = null
+  }
+
+  // Debounce rapid directory changes to avoid hammering Vite ws proxy.
+  qcWsOpenTimer = setTimeout(() => {
+    qcWsOpenTimer = null
+
+    if (!baseDir) return
+
+    if (qcWs && qcWsBaseDir === baseDir && qcWs.readyState <= 1) {
+      return
+    }
+
+    closeQCWebSocket()
+    qcWsBaseDir = baseDir
+
+    const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
+    const query = new URLSearchParams({ base_dir: baseDir, client_id: qcClientId }).toString()
+
+    // Dev: connect directly to backend to avoid Vite ws proxy instability.
+    // Prod: same-origin (behind reverse proxy) is fine.
+    const wsHost = import.meta.env.DEV
+      ? `${import.meta.env.VITE_API_HOST || '127.0.0.1'}:${import.meta.env.VITE_API_PORT || '8000'}`
+      : window.location.host
+
+    const url = `${protocol}://${wsHost}/api/upload/qc/ws?${query}`
+
+    try {
+      qcWs = new WebSocket(url)
+    } catch (e) {
+      console.warn('[QC WS] Failed to create WebSocket:', e)
+      scheduleQCWebSocketReconnect(baseDir)
+      return
+    }
+
+    qcWs.onopen = () => {
+      qcWsReconnectAttempts = 0
+
+      if (qcWsHeartbeatTimer) {
+        clearInterval(qcWsHeartbeatTimer)
+      }
+
+      qcWsHeartbeatTimer = setInterval(() => {
+        if (!qcWs || qcWs.readyState !== WebSocket.OPEN) return
+        try {
+          qcWs.send(JSON.stringify({ type: 'ping' }))
+        } catch {
+          // ignore
+        }
+      }, 10000)
+    }
+
+    qcWs.onmessage = (ev) => {
+      try {
+        const msg = JSON.parse(ev.data)
+        if (!msg || typeof msg !== 'object') return
+
+        if (msg.type === 'qc_result_updated') {
+          if (msg.source_client_id && msg.source_client_id === qcClientId) {
+            return
+          }
+          syncQCResultForCurrentDir({ showToast: true, force: true })
+          return
+        }
+
+        if (msg.type === 'qc_episode_updated') {
+          if (msg.source_client_id && msg.source_client_id === qcClientId) {
+            return
+          }
+          syncQCResultForCurrentDir({ showToast: false, force: true })
+          return
+        }
+
+        if (msg.type === 'qc_ws_connected') {
+          return
+        }
+      } catch (e) {
+        console.warn('[QC WS] Failed to parse message:', e)
+      }
+    }
+
+    qcWs.onclose = () => {
+      if (qcWsBaseDir === baseDir) {
+        scheduleQCWebSocketReconnect(baseDir)
+      }
+    }
+
+    qcWs.onerror = () => {
+      if (qcWsBaseDir === baseDir) {
+        scheduleQCWebSocketReconnect(baseDir)
+      }
+    }
+  }, 300)
+}
+
 
 // Auto-check on mount and start task polling
 onMounted(async () => {
@@ -436,7 +706,7 @@ onMounted(async () => {
 // local_dir 变化时自动同步 qc_result.json（支持跨机器/重复打开同一数据集）
 watch(
   () => currentLerobotDir.value,
-  () => {
+  (lerobotDir) => {
     if (qcResultSyncTimer) {
       clearTimeout(qcResultSyncTimer)
       qcResultSyncTimer = null
@@ -444,12 +714,15 @@ watch(
     qcResultSyncTimer = setTimeout(() => {
       syncQCResultForCurrentDir({ showToast: true })
     }, 300)
+
+    openQCWebSocket(lerobotDir)
   },
   { immediate: true }
 )
 
 onUnmounted(() => {
   taskStore.stopPolling()
+  closeQCWebSocket()
 })
 </script>
 
@@ -608,14 +881,16 @@ onUnmounted(() => {
     <TaskPreviewBar />
 
     <!-- QC Inspector Dialog -->
-    <QCInspector
-      v-model="showQCInspector"
-      :episodes="qcEpisodes"
-      :base-dir="`${resolvePath(config.local_dir)}/lerobot`"
-      :loading="qcLoading"
-      :initial-result="qcResult || undefined"
-      @confirm="handleQCConfirm"
-    />
+      <QCInspector
+        v-model="showQCInspector"
+        :episodes="qcEpisodes"
+        :base-dir="`${resolvePath(config.local_dir)}/lerobot`"
+        :loading="qcLoading"
+        :initial-result="qcResult || undefined"
+        @confirm="handleQCConfirm"
+        @episode-update="handleEpisodeUpdate"
+      />
+
 
     <!-- Merge Episode Selector -->
     <MergeEpisodeSelector

@@ -7,7 +7,7 @@
 
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { Icon } from '@iconify/vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
 interface Episode {
   name: string
@@ -38,6 +38,7 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   (e: 'update:modelValue', value: boolean): void
   (e: 'confirm', result: QCResult): void
+  (e: 'episode-update', payload: { episodeName: string; status: 'passed' | 'failed' | 'pending' }): void
 }>()
 
 const visible = computed({
@@ -92,19 +93,14 @@ watch(
     const newStatus: Record<string, 'passed' | 'failed' | 'pending'> = {}
     let resumeCount = 0
 
+    const passed = new Set(initialResult?.passed ?? [])
+    const failed = new Set(initialResult?.failed ?? [])
+
     eps.forEach(ep => {
-      const existingStatus = qcStatus.value[ep.name]
-
-      if (existingStatus && existingStatus !== 'pending') {
-        newStatus[ep.name] = existingStatus
-        resumeCount++
-        return
-      }
-
-      if (initialResult?.passed.includes(ep.name)) {
+      if (passed.has(ep.name)) {
         newStatus[ep.name] = 'passed'
         resumeCount++
-      } else if (initialResult?.failed.includes(ep.name)) {
+      } else if (failed.has(ep.name)) {
         newStatus[ep.name] = 'failed'
         resumeCount++
       } else {
@@ -159,22 +155,36 @@ const getVideoUrl = (episodeName: string, camera?: string): string => {
 // 当前视频 key（用于强制刷新 video 元素）
 const videoKey = computed(() => `${currentEpisode.value}-${currentCamera.value}`)
 
-// 播放视频
-const playVideo = (episodeName: string) => {
+const playVideo = async (episodeName: string) => {
+  const status = qcStatus.value[episodeName]
+  if (status && status !== 'pending') {
+    try {
+      await ElMessageBox.confirm(
+        `该 episode 已标记为「${status === 'passed' ? '通过' : '不通过'}」，是否继续查看/修改？`,
+        '提示',
+        {
+          confirmButtonText: '继续',
+          cancelButtonText: '取消',
+          type: 'warning',
+        }
+      )
+    } catch {
+      return
+    }
+  }
+
   currentEpisode.value = episodeName
 }
 
-// 标记通过
 const markPassed = (episodeName: string) => {
   qcStatus.value[episodeName] = 'passed'
-  // 自动跳转到下一个待检查的 episode
+  emit('episode-update', { episodeName, status: 'passed' })
   autoNextPending()
 }
 
-// 标记不通过
 const markFailed = (episodeName: string) => {
   qcStatus.value[episodeName] = 'failed'
-  // 自动跳转到下一个待检查的 episode
+  emit('episode-update', { episodeName, status: 'failed' })
   autoNextPending()
 }
 

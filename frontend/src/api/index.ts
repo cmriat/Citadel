@@ -1,6 +1,20 @@
 import axios from 'axios'
 import type { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios'
 
+export class ApiError extends Error {
+  status?: number
+  detail?: string
+  data?: unknown
+
+  constructor(message: string, opts?: { status?: number; detail?: string; data?: unknown }) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = opts?.status
+    this.detail = opts?.detail
+    this.data = opts?.data
+  }
+}
+
 // 从环境变量读取配置，提供合理的默认值
 const API_TIMEOUT = parseInt(import.meta.env.VITE_API_TIMEOUT || '120000')
 
@@ -38,9 +52,13 @@ const api = axios.create({
 api.interceptors.response.use(
   (response: AxiosResponse) => response.data,
   (error) => {
-    const message = error.response?.data?.detail || error.message || 'Request failed'
+    const status = error.response?.status
+    const data = error.response?.data
+    const detail = data?.detail
+    const message = detail || error.message || 'Request failed'
+
     console.error('API Error:', message)
-    return Promise.reject(new Error(message))
+    return Promise.reject(new ApiError(message, { status, detail, data }))
   }
 )
 
