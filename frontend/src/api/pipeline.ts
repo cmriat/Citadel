@@ -314,7 +314,7 @@ export const updateQCEpisode = async (
   baseDir: string,
   episodeName: string,
   status: QCEpisodeStatus,
-  opts?: { client_id?: string; base_timestamp?: string; force?: boolean }
+  opts?: { client_id?: string; base_timestamp?: string; base_status?: QCEpisodeStatus; force?: boolean }
 ): Promise<UpdateQCEpisodeResponse> => {
   return api.post('/upload/update-qc-episode', {
     base_dir: baseDir,
@@ -322,6 +322,7 @@ export const updateQCEpisode = async (
     status,
     client_id: opts?.client_id,
     base_timestamp: opts?.base_timestamp,
+    base_status: opts?.base_status,
     force: opts?.force ?? false,
   })
 }
@@ -364,4 +365,3 @@ export const getVideoStreamUrl = (baseDir: string, episodeName: string, camera =
   const encodedEpisode = encodeURIComponent(episodeName)
   return `/api/upload/video-stream?base_dir=${encodedBaseDir}&episode_name=${encodedEpisode}&camera=${camera}`
 }
-

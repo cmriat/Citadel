@@ -9,7 +9,7 @@ import {
   runStep, derivePaths, hasPathTemplate, resolvePath,
   checkDownloadReady, checkConvertReady, checkMergedReady,
   scanEpisodes, runMerge, getMergeProgress,
-  saveQCResult, loadQCResult, uploadMerged, updateQCEpisode
+  loadQCResult, uploadMerged, updateQCEpisode
 } from '@/api/pipeline'
 import type { PipelineConfig, CheckResult, Episode, QCResult, MergeConfig, QCResultResponse } from '@/api/pipeline'
 import ValidatedInput from '@/components/ValidatedInput.vue'
@@ -84,16 +84,20 @@ const qcResultTimestamp = ref<string | null>(null)
 const mergeTaskId = ref<string | null>(null)
 
 const qcClientId = (() => {
-  const key = 'citadel_qc_client_id'
-  try {
-    const existing = sessionStorage.getItem(key)
-    if (existing) return existing
-    const created = `web-${Date.now()}-${Math.random().toString(16).slice(2)}`
-    sessionStorage.setItem(key, created)
-    return created
-  } catch {
-    return `web-${Date.now()}-${Math.random().toString(16).slice(2)}`
-  }
+  // 注意：不要用 sessionStorage 持久化 client_id。
+  // 浏览器“复制标签页”会复制 sessionStorage，导致两个窗口 client_id 一样，
+  // 进而把对方的 ws 消息误判为“自己发的”并忽略，表现为不同用户无法实时同步。
+  const globalKey = '__citadel_qc_client_id__'
+  const existing = (globalThis as any)[globalKey]
+  if (typeof existing === 'string' && existing) return existing
+
+  const created =
+    typeof crypto !== 'undefined' && typeof (crypto as any).randomUUID === 'function'
+      ? `web-${(crypto as any).randomUUID()}`
+      : `web-${Date.now()}-${Math.random().toString(16).slice(2)}`
+
+  ;(globalThis as any)[globalKey] = created
+  return created
 })()
 
 let qcWs: WebSocket | null = null
@@ -291,7 +295,15 @@ const updateLocalEpisodeStatus = (episodeName: string, status: 'passed' | 'faile
   qcResult.value = { passed: Array.from(passed), failed: Array.from(failed) }
 }
 
+const getLocalEpisodeStatus = (episodeName: string): 'passed' | 'failed' | 'pending' => {
+  if (!qcResult.value) return 'pending'
+  if (qcResult.value.passed.includes(episodeName)) return 'passed'
+  if (qcResult.value.failed.includes(episodeName)) return 'failed'
+  return 'pending'
+}
+
 const handleEpisodeUpdate = async (payload: { episodeName: string; status: 'passed' | 'failed' | 'pending' }) => {
+  const baseStatus = getLocalEpisodeStatus(payload.episodeName)
   updateLocalEpisodeStatus(payload.episodeName, payload.status)
 
   try {
@@ -299,15 +311,20 @@ const handleEpisodeUpdate = async (payload: { episodeName: string; status: 'pass
     const res = await updateQCEpisode(lerobotDir, payload.episodeName, payload.status, {
       client_id: qcClientId,
       base_timestamp: qcResultTimestamp.value ?? undefined,
+      base_status: baseStatus,
     })
     qcResultTimestamp.value = res.timestamp ?? qcResultTimestamp.value
   } catch (e) {
     if (e instanceof ApiError && e.status === 409) {
       const current = (e.data as any)?.current
+      const episode = (e.data as any)?.episode
       const time = current?.timestamp ? new Date(current.timestamp).toLocaleString() : ''
+      const currentStatus = episode?.current_status
+      const statusText: Record<string, string> = { passed: '通过', failed: '不通过', pending: '未标记' }
+      const currentStatusLabel = currentStatus ? (statusText[currentStatus] ?? String(currentStatus)) : ''
       try {
         await ElMessageBox.confirm(
-          `质检结果已更新${time ? ` (${time})` : ''}，是否覆盖当前标记？`,
+          `该 episode 已被其他人标记为「${currentStatusLabel || '已更新'}」${time ? ` (${time})` : ''}，是否覆盖为你的标记？`,
           '覆盖确认',
           {
             confirmButtonText: '覆盖',
@@ -325,6 +342,7 @@ const handleEpisodeUpdate = async (payload: { episodeName: string; status: 'pass
         const res = await updateQCEpisode(lerobotDir, payload.episodeName, payload.status, {
           client_id: qcClientId,
           base_timestamp: qcResultTimestamp.value ?? undefined,
+          base_status: baseStatus,
           force: true,
         })
         qcResultTimestamp.value = res.timestamp ?? qcResultTimestamp.value
@@ -341,57 +359,50 @@ const handleEpisodeUpdate = async (payload: { episodeName: string; status: 'pass
   }
 }
 
+const handleBulkEpisodeUpdate = async (
+  updates: { episodeName: string; status: 'passed' | 'failed' | 'pending'; baseStatus: 'passed' | 'failed' | 'pending' }[]
+) => {
+  if (!updates || updates.length === 0) return
+
+  // 先更新本地状态，保持 UI 及时反馈；失败/冲突时再强制同步。
+  updates.forEach(u => updateLocalEpisodeStatus(u.episodeName, u.status))
+
+  const lerobotDir = currentLerobotDir.value
+  let hasConflict = false
+
+  for (const u of updates) {
+    try {
+      const res = await updateQCEpisode(lerobotDir, u.episodeName, u.status, {
+        client_id: qcClientId,
+        base_timestamp: qcResultTimestamp.value ?? undefined,
+        base_status: u.baseStatus,
+      })
+      qcResultTimestamp.value = res.timestamp ?? qcResultTimestamp.value
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409) {
+        hasConflict = true
+        // 批量操作冲突时默认跳过该条，避免弹窗轰炸。
+        await syncQCResultForCurrentDir({ showToast: false, force: true })
+        continue
+      }
+      ElMessage.warning(`批量更新失败: ${(e as Error).message}`)
+      await syncQCResultForCurrentDir({ showToast: false, force: true })
+    }
+  }
+
+  if (hasConflict) {
+    ElMessage.warning('批量更新中发现冲突，已同步最新结果')
+  }
+}
+
 const handleQCConfirm = async (result: QCResult) => {
   qcResult.value = result
   ElMessage.success(`质检完成: ${result.passed.length} 通过, ${result.failed.length} 不通过`)
   showQCInspector.value = false
 
-  try {
-    const lerobotDir = currentLerobotDir.value
-    const baseTs = qcResultTimestamp.value ?? undefined
-    const res = await saveQCResult(lerobotDir, result, { client_id: qcClientId, base_timestamp: baseTs })
-    lastSyncedQCLerobotDir.value = lerobotDir
-    qcResultTimestamp.value = res.timestamp ?? qcResultTimestamp.value
-    console.log('[handleQCConfirm] QC result saved to file')
-  } catch (e) {
-    console.error('[handleQCConfirm] Failed to save QC result:', e)
-
-    if (e instanceof ApiError && e.status === 409) {
-      const current = (e.data as any)?.current
-      const time = current?.timestamp ? new Date(current.timestamp).toLocaleString() : ''
-      try {
-        await ElMessageBox.confirm(
-          `已存在质检结果${time ? ` (${time})` : ''}，是否覆盖保存？`,
-          '覆盖确认',
-          {
-            confirmButtonText: '覆盖保存',
-            cancelButtonText: '取消',
-            type: 'warning',
-          }
-        )
-      } catch {
-        return
-      }
-
-      try {
-        const lerobotDir = currentLerobotDir.value
-        const res = await saveQCResult(lerobotDir, result, {
-          client_id: qcClientId,
-          base_timestamp: qcResultTimestamp.value ?? undefined,
-          force: true,
-        })
-        lastSyncedQCLerobotDir.value = lerobotDir
-        qcResultTimestamp.value = res.timestamp ?? qcResultTimestamp.value
-        ElMessage.success('已覆盖保存质检结果')
-        return
-      } catch (e2) {
-        ElMessage.error(`覆盖保存失败: ${(e2 as Error).message}`)
-        return
-      }
-    }
-
-    ElMessage.warning(`质检结果保存失败: ${(e as Error).message}`)
-  }
+  // 多人协作下，避免用全量覆盖保存（容易覆盖他人刚写入的结果）。
+  // 以每次 episode 更新为准，这里仅做一次强制同步，确保本地与全局一致。
+  await syncQCResultForCurrentDir({ showToast: false, force: true })
 }
 
 // ============ Merge ============
@@ -599,8 +610,16 @@ const openQCWebSocket = (baseDir: string) => {
 
     // Dev: connect directly to backend to avoid Vite ws proxy instability.
     // Prod: same-origin (behind reverse proxy) is fine.
+    const apiPort = import.meta.env.VITE_API_PORT || '8000'
+    const apiHostEnv = import.meta.env.VITE_API_HOST || '127.0.0.1'
+
+    const isLocalApiHost = apiHostEnv === '127.0.0.1' || apiHostEnv === 'localhost'
+
+    // Dev: 直连后端（避免 Vite ws proxy 在跨机器/长连接下不稳定）。
+    // 若 VITE_API_HOST=localhost/127.0.0.1，则使用当前页面的 hostname（也就是提供前端的那台机器）。
+    // Prod: 同源（behind reverse proxy）。
     const wsHost = import.meta.env.DEV
-      ? `${import.meta.env.VITE_API_HOST || '127.0.0.1'}:${import.meta.env.VITE_API_PORT || '8000'}`
+      ? `${isLocalApiHost ? window.location.hostname : apiHostEnv}:${apiPort}`
       : window.location.host
 
     const url = `${protocol}://${wsHost}/api/upload/qc/ws?${query}`
@@ -636,18 +655,29 @@ const openQCWebSocket = (baseDir: string) => {
         if (!msg || typeof msg !== 'object') return
 
         if (msg.type === 'qc_result_updated') {
-          if (msg.source_client_id && msg.source_client_id === qcClientId) {
-            return
-          }
-          syncQCResultForCurrentDir({ showToast: true, force: true })
+          // qc_result_updated 代表“全量结果发生变化”（可能来自旧客户端）。
+          // 这里无法增量更新，只能拉全量。
+          const showToast = !msg.source_client_id || msg.source_client_id !== qcClientId
+          syncQCResultForCurrentDir({ showToast, force: true })
           return
         }
 
         if (msg.type === 'qc_episode_updated') {
-          if (msg.source_client_id && msg.source_client_id === qcClientId) {
-            return
+          // 对单条 episode 的更新：先就地更新本地状态，保证 UI 立刻响应。
+          // 如果消息字段缺失，再回退到拉全量。
+          const episodeName = msg.episode_name
+          const status = msg.status
+          if (
+            typeof episodeName === 'string' &&
+            (status === 'passed' || status === 'failed' || status === 'pending')
+          ) {
+            updateLocalEpisodeStatus(episodeName, status)
+            if (typeof msg.timestamp === 'string') {
+              qcResultTimestamp.value = msg.timestamp
+            }
+          } else {
+            syncQCResultForCurrentDir({ showToast: false, force: true })
           }
-          syncQCResultForCurrentDir({ showToast: false, force: true })
           return
         }
 
@@ -889,6 +919,7 @@ onUnmounted(() => {
         :initial-result="qcResult || undefined"
         @confirm="handleQCConfirm"
         @episode-update="handleEpisodeUpdate"
+        @bulk-episode-update="handleBulkEpisodeUpdate"
       />
 
 

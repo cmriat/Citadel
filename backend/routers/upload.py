@@ -235,6 +235,10 @@ class QCEpisodeUpdateRequest(BaseModel):
     episode_name: str
     status: Literal["passed", "failed", "pending"]
 
+    # 细粒度乐观锁：仅检测同一 episode 的并发修改。
+    # 传入你“看到的旧状态”，服务端仅在该 episode 状态已变化时返回 409。
+    base_status: Optional[Literal["passed", "failed", "pending"]] = None
+
     client_id: Optional[str] = None
     base_timestamp: Optional[str] = None
     force: bool = False
@@ -328,6 +332,18 @@ def _load_qc_data(qc_file: Path) -> Optional[Dict[str, Any]]:
         return json.load(f)
 
 
+def _get_episode_status(
+    qc_data: Dict[str, Any], episode_name: str
+) -> Literal["passed", "failed", "pending"]:
+    passed = set(qc_data.get("passed", []) or [])
+    failed = set(qc_data.get("failed", []) or [])
+    if episode_name in passed:
+        return "passed"
+    if episode_name in failed:
+        return "failed"
+    return "pending"
+
+
 def _write_qc_data_atomic(qc_file: Path, qc_data: Dict[str, Any]) -> None:
     tmp = qc_file.with_suffix(qc_file.suffix + ".tmp")
     with open(tmp, "w", encoding="utf-8") as f:
@@ -375,28 +391,49 @@ async def update_qc_episode(request: QCEpisodeUpdateRequest) -> Dict[str, Any]:
 
         async with lock:
             existing = _load_qc_data(qc_file)
-            current_ts = (existing or {}).get("timestamp")
+            existing_data = existing or {}
+            current_ts = existing_data.get("timestamp")
 
             if existing and not request.force:
-                conflict = (
-                    request.base_timestamp is None
-                    or current_ts is None
-                    or request.base_timestamp != current_ts
-                )
-                if conflict:
-                    return JSONResponse(
-                        status_code=409,
-                        content={
-                            "message": "已存在质检结果，请确认是否覆盖",
-                            "current": {
-                                "timestamp": current_ts,
-                                "passed_count": len((existing or {}).get("passed", [])),
-                                "failed_count": len((existing or {}).get("failed", [])),
-                            },
-                        },
-                    )
+                conflict_payload: Optional[Dict[str, Any]] = None
 
-            existing_data = existing or {}
+                # 新版：按 episode 粒度做冲突检测，避免不同 episode 互相干扰。
+                if request.base_status is not None:
+                    current_status = _get_episode_status(
+                        existing_data, request.episode_name
+                    )
+                    if request.base_status != current_status:
+                        conflict_payload = {
+                            "message": "该 episode 已被其他人更新，请确认是否覆盖",
+                            "conflict_type": "episode",
+                            "episode": {
+                                "name": request.episode_name,
+                                "current_status": current_status,
+                                "requested_status": request.status,
+                                "base_status": request.base_status,
+                            },
+                        }
+                else:
+                    # 旧版：全局 timestamp 乐观锁（保留兼容旧前端）。
+                    conflict = (
+                        request.base_timestamp is None
+                        or current_ts is None
+                        or request.base_timestamp != current_ts
+                    )
+                    if conflict:
+                        conflict_payload = {
+                            "message": "已存在质检结果，请确认是否覆盖",
+                            "conflict_type": "timestamp",
+                        }
+
+                if conflict_payload is not None:
+                    conflict_payload["current"] = {
+                        "timestamp": current_ts,
+                        "passed_count": len(existing_data.get("passed", []) or []),
+                        "failed_count": len(existing_data.get("failed", []) or []),
+                    }
+                    return JSONResponse(status_code=409, content=conflict_payload)
+
             passed_set = set(existing_data.get("passed", []))
             failed_set = set(existing_data.get("failed", []))
 

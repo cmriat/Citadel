@@ -39,6 +39,7 @@ const emit = defineEmits<{
   (e: 'update:modelValue', value: boolean): void
   (e: 'confirm', result: QCResult): void
   (e: 'episode-update', payload: { episodeName: string; status: 'passed' | 'failed' | 'pending' }): void
+  (e: 'bulk-episode-update', payload: { episodeName: string; status: 'passed' | 'failed' | 'pending'; baseStatus: 'passed' | 'failed' | 'pending' }[]): void
 }>()
 
 const visible = computed({
@@ -211,17 +212,33 @@ const autoNextPending = () => {
 
 // 全部标记为通过
 const markAllPassed = () => {
+  const updates = Object.entries(qcStatus.value)
+    .filter(([_, s]) => s !== 'passed')
+    .map(([episodeName, baseStatus]) => ({ episodeName, status: 'passed' as const, baseStatus }))
+
   Object.keys(qcStatus.value).forEach(k => {
     qcStatus.value[k] = 'passed'
   })
+
+  if (updates.length > 0) {
+    emit('bulk-episode-update', updates)
+  }
   ElMessage.success(`已将 ${stats.value.total} 个 episode 标记为通过`)
 }
 
 // 重置所有状态
 const resetAll = () => {
+  const updates = Object.entries(qcStatus.value)
+    .filter(([_, s]) => s !== 'pending')
+    .map(([episodeName, baseStatus]) => ({ episodeName, status: 'pending' as const, baseStatus }))
+
   Object.keys(qcStatus.value).forEach(k => {
     qcStatus.value[k] = 'pending'
   })
+
+  if (updates.length > 0) {
+    emit('bulk-episode-update', updates)
+  }
   ElMessage.info('已重置所有状态')
 }
 
