@@ -238,6 +238,42 @@ pixi run merge \
 pixi run merge --sources ./converted/episode_* --output ./merged/
 ```
 
+#### 5. Frame-State 对齐分析
+
+分析 LeRobot 数据集中视频帧与关节数据的时间对齐情况：
+
+```bash
+# 基本用法（分析单个 episode）
+python scripts/analyze_frame_state_alignment.py /path/to/dataset
+
+# 使用黑色区域检测（ALOHA等黑色夹爪机器人）
+python scripts/analyze_frame_state_alignment.py /path/to/dataset --black-detection
+
+# 使用颜色检测（橙色夹爪）
+python scripts/analyze_frame_state_alignment.py /path/to/dataset --color-detection
+
+# 启用状态引导去噪（提高检测准确性）
+python scripts/analyze_frame_state_alignment.py /path/to/dataset --black-detection --denoise
+
+# 分析所有 episodes
+python scripts/analyze_frame_state_alignment.py /path/to/dataset --all-episodes -o output/
+```
+
+**参数说明：**
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `dataset_dir` | LeRobot 数据集路径 | **必填** |
+| `--episode, -e` | Episode 索引 | 0 |
+| `--output, -o` | 输出目录 | dataset_dir/alignment_analysis |
+| `--all-episodes, -a` | 分析所有 episodes | False |
+| `--camera, -c` | 相机名称 | cam_left_wrist |
+| `--gripper, -g` | 夹爪 (left/right) | left |
+| `--black-detection` | 黑色区域检测模式（ALOHA优化） | False |
+| `--color-detection` | 颜色检测模式（橙色夹爪） | False |
+| `--denoise` | 启用状态引导去噪 | False |
+
+详细文档请参考 [docs/frame_state_alignment.md](./docs/frame_state_alignment.md)。
+
 ## 项目结构
 
 ```
@@ -272,7 +308,16 @@ Citadel/
 ├── scripts/                      # 核心脚本
 │   ├── download.sh               # 下载脚本
 │   ├── convert.py                # 转换脚本
-│   └── merge_lerobot.py          # 合并脚本
+│   ├── merge_lerobot.py          # 合并脚本
+│   ├── analyze_frame_state_alignment.py  # 帧-状态对齐分析入口
+│   └── alignment/                # 对齐分析模块 ⭐
+│       ├── config.py             # 配置管理
+│       ├── data_loader.py        # 数据集加载
+│       ├── video_tracker.py      # 视频追踪器
+│       ├── signal_processing.py  # 信号处理与去噪
+│       ├── visualization.py      # 可视化生成
+│       ├── analyzer.py           # 核心分析逻辑
+│       └── cli.py                # 命令行接口
 ├── frontend/                     # Vue 3 前端
 │   ├── src/
 │   │   ├── views/                # 页面组件
@@ -406,11 +451,23 @@ A: 参考 [INSTALL.md](./INSTALL.md) 安装指南，主要步骤：
   - QC 质检组件：三相机视频预览、通过/不通过标记
   - QC 结果持久化：自动保存和恢复进度
   - Merge 集成：仅合并通过质检的 episode
-- [x] **v0.2.2** - 配置重构（当前）
+- [x] **v0.2.2** - 配置重构
   - 统一配置管理模块
   - 环境变量支持
   - 移除硬编码路径和魔法数字
-- [ ] **v0.3.0** - 功能增强、日志监控
+- [x] **v0.2.3** - Bug修复与QC优化
+  - 配置同步机制
+  - 18处Bug修复
+  - 三相机并排布局
+- [x] **v0.2.4** - 前端代码质量优化
+  - 7处Bug修复
+  - 防御性编程
+  - 暗色主题改进
+- [x] **v0.2.5** - 数据质量与转换优化（当前）
+  - 线性插值对齐、自适应边界裁剪
+  - Frame-State对齐分析工具模块化重构
+  - 黑色区域检测、状态引导去噪
+- [ ] **v0.3.0** - UI/UX优化、功能增强、日志监控
 
 ## 许可证
 
@@ -424,5 +481,5 @@ MIT License
 
 ---
 
-**版本**: v0.2.2
-**最后更新**: 2026-01-09
+**版本**: v0.2.5
+**最后更新**: 2026-01-26

@@ -67,10 +67,6 @@ merge = "python -m cli.merge_cli"
 # 示例: pixi run visualize /path/to/episode_0001
 visualize = "python scripts/visualize_parquet.py"
 
-# 筛选工具 - 筛选LeRobot数据集，去除不完整和异常的episode
-# 示例: pixi run filter /path/to/input /path/to/output --jump-threshold 0.2
-filter = "python scripts/filter_lerobot.py"
-
 # =============================================================================
 # 测试和开发工具
 # =============================================================================
