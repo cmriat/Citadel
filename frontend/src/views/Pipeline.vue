@@ -4,12 +4,12 @@ import { Icon } from '@iconify/vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useThemeStore } from '@/stores/theme'
 import { useTaskStore } from '@/stores/tasks'
-import { getDefaults, type DefaultConfig } from '@/api'
+import { getDefaults, type DefaultConfig, ApiError } from '@/api'
 import {
   runStep, derivePaths, hasPathTemplate, resolvePath,
   checkDownloadReady, checkConvertReady, checkMergedReady,
   scanEpisodes, runMerge, getMergeProgress,
-  saveQCResult, loadQCResult, uploadMerged
+  loadQCResult, uploadMerged, updateQCEpisode
 } from '@/api/pipeline'
 import type { PipelineConfig, CheckResult, Episode, QCResult, MergeConfig, QCResultResponse } from '@/api/pipeline'
 import ValidatedInput from '@/components/ValidatedInput.vue'
@@ -71,12 +71,45 @@ const config = reactive<PipelineConfig>(loadConfig())
 const loading = ref<'download' | 'convert' | 'upload' | 'qc' | 'merge' | null>(null)
 const paths = computed(() => derivePaths(config))
 
+// 解析本地目录模板（用于 QC/merge 等需要实际路径的场景）
+const resolvedLocalDir = computed(() => resolvePath(config.local_dir))
+const currentLerobotDir = computed(() => `${resolvedLocalDir.value}/lerobot`)
+
 // ============ QC + Merge State ============
 const showQCInspector = ref(false)
 const qcEpisodes = ref<Episode[]>([])
 const qcLoading = ref(false)
 const qcResult = ref<QCResult | null>(null)
+const qcResultTimestamp = ref<string | null>(null)
 const mergeTaskId = ref<string | null>(null)
+
+const qcClientId = (() => {
+  // 注意：不要用 sessionStorage 持久化 client_id。
+  // 浏览器“复制标签页”会复制 sessionStorage，导致两个窗口 client_id 一样，
+  // 进而把对方的 ws 消息误判为“自己发的”并忽略，表现为不同用户无法实时同步。
+  const globalKey = '__citadel_qc_client_id__'
+  const existing = (globalThis as any)[globalKey]
+  if (typeof existing === 'string' && existing) return existing
+
+  const created =
+    typeof crypto !== 'undefined' && typeof (crypto as any).randomUUID === 'function'
+      ? `web-${(crypto as any).randomUUID()}`
+      : `web-${Date.now()}-${Math.random().toString(16).slice(2)}`
+
+  ;(globalThis as any)[globalKey] = created
+  return created
+})()
+
+let qcWs: WebSocket | null = null
+let qcWsHeartbeatTimer: ReturnType<typeof setInterval> | null = null
+let qcWsReconnectTimer: ReturnType<typeof setTimeout> | null = null
+let qcWsOpenTimer: ReturnType<typeof setTimeout> | null = null
+let qcWsReconnectAttempts = 0
+let qcWsBaseDir: string | null = null
+
+// 当前已同步过 QC 结果的目录（用于避免重复 toast）
+const lastSyncedQCLerobotDir = ref<string | null>(null)
+let qcResultSyncTimer: ReturnType<typeof setTimeout> | null = null
 
 // Merge episode selection
 const showMergeSelector = ref(false)
@@ -226,17 +259,139 @@ const handleUpload = async () => {
 // ============ QC Inspector ============
 const openQCInspector = async () => {
   qcLoading.value = true
+  qcEpisodes.value = []
   showQCInspector.value = true
   try {
-    const resolvedDir = resolvePath(config.local_dir)
+    const resolvedDir = resolvedLocalDir.value
     console.log('[openQCInspector] resolvedDir:', resolvedDir)
+
+    await syncQCResultForCurrentDir({ showToast: false, force: true })
+
     const result = await scanEpisodes(resolvedDir)
     console.log('[openQCInspector] episodes count:', result?.length)
     qcEpisodes.value = result
   } catch (e) {
     ElMessage.error(`扫描 episode 失败: ${(e as Error).message}`)
+    showQCInspector.value = false
   } finally {
     qcLoading.value = false
+  }
+}
+
+const updateLocalEpisodeStatus = (episodeName: string, status: 'passed' | 'failed' | 'pending') => {
+  if (!qcResult.value) {
+    qcResult.value = { passed: [], failed: [] }
+  }
+
+  const passed = new Set(qcResult.value.passed)
+  const failed = new Set(qcResult.value.failed)
+
+  passed.delete(episodeName)
+  failed.delete(episodeName)
+
+  if (status === 'passed') passed.add(episodeName)
+  if (status === 'failed') failed.add(episodeName)
+
+  qcResult.value = { passed: Array.from(passed), failed: Array.from(failed) }
+}
+
+const getLocalEpisodeStatus = (episodeName: string): 'passed' | 'failed' | 'pending' => {
+  if (!qcResult.value) return 'pending'
+  if (qcResult.value.passed.includes(episodeName)) return 'passed'
+  if (qcResult.value.failed.includes(episodeName)) return 'failed'
+  return 'pending'
+}
+
+const handleEpisodeUpdate = async (payload: { episodeName: string; status: 'passed' | 'failed' | 'pending' }) => {
+  const baseStatus = getLocalEpisodeStatus(payload.episodeName)
+  updateLocalEpisodeStatus(payload.episodeName, payload.status)
+
+  try {
+    const lerobotDir = currentLerobotDir.value
+    const res = await updateQCEpisode(lerobotDir, payload.episodeName, payload.status, {
+      client_id: qcClientId,
+      base_timestamp: qcResultTimestamp.value ?? undefined,
+      base_status: baseStatus,
+    })
+    qcResultTimestamp.value = res.timestamp ?? qcResultTimestamp.value
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 409) {
+      const current = (e.data as any)?.current
+      const episode = (e.data as any)?.episode
+      const time = current?.timestamp ? new Date(current.timestamp).toLocaleString() : ''
+      const currentStatus = episode?.current_status
+      const statusText: Record<string, string> = { passed: '通过', failed: '不通过', pending: '未标记' }
+      const currentStatusLabel = currentStatus ? (statusText[currentStatus] ?? String(currentStatus)) : ''
+      try {
+        await ElMessageBox.confirm(
+          `该 episode 已被其他人标记为「${currentStatusLabel || '已更新'}」${time ? ` (${time})` : ''}，是否覆盖为你的标记？`,
+          '覆盖确认',
+          {
+            confirmButtonText: '覆盖',
+            cancelButtonText: '取消',
+            type: 'warning',
+          }
+        )
+      } catch {
+        await syncQCResultForCurrentDir({ showToast: true, force: true })
+        return
+      }
+
+      try {
+        const lerobotDir = currentLerobotDir.value
+        const res = await updateQCEpisode(lerobotDir, payload.episodeName, payload.status, {
+          client_id: qcClientId,
+          base_timestamp: qcResultTimestamp.value ?? undefined,
+          base_status: baseStatus,
+          force: true,
+        })
+        qcResultTimestamp.value = res.timestamp ?? qcResultTimestamp.value
+        ElMessage.success('已覆盖更新')
+        return
+      } catch (e2) {
+        ElMessage.error(`覆盖更新失败: ${(e2 as Error).message}`)
+        return
+      }
+    }
+
+    ElMessage.warning(`更新质检状态失败: ${(e as Error).message}`)
+    await syncQCResultForCurrentDir({ showToast: false, force: true })
+  }
+}
+
+const handleBulkEpisodeUpdate = async (
+  updates: { episodeName: string; status: 'passed' | 'failed' | 'pending'; baseStatus: 'passed' | 'failed' | 'pending' }[]
+) => {
+  if (!updates || updates.length === 0) return
+
+  // 先更新本地状态，保持 UI 及时反馈；失败/冲突时再强制同步。
+  updates.forEach(u => updateLocalEpisodeStatus(u.episodeName, u.status))
+
+  const lerobotDir = currentLerobotDir.value
+  let hasConflict = false
+
+  for (const u of updates) {
+    try {
+      const res = await updateQCEpisode(lerobotDir, u.episodeName, u.status, {
+        client_id: qcClientId,
+        base_timestamp: qcResultTimestamp.value ?? undefined,
+        base_status: u.baseStatus,
+      })
+      qcResultTimestamp.value = res.timestamp ?? qcResultTimestamp.value
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409) {
+        hasConflict = true
+        // 批量操作冲突时默认跳过该条，避免弹窗轰炸。
+        await syncQCResultForCurrentDir({ showToast: false, force: true })
+        continue
+      }
+      ElMessage.warning(`批量更新失败: ${(e as Error).message}`)
+      await syncQCResultForCurrentDir({ showToast: false, force: true })
+    }
+  }
+
+  if (hasConflict) {
+    ElMessage.warning('批量更新中发现冲突，已同步最新结果')
   }
 }
 
@@ -245,16 +400,9 @@ const handleQCConfirm = async (result: QCResult) => {
   ElMessage.success(`质检完成: ${result.passed.length} 通过, ${result.failed.length} 不通过`)
   showQCInspector.value = false
 
-  // 保存 QC 结果到文件
-  try {
-    const resolvedDir = resolvePath(config.local_dir)
-    const lerobotDir = `${resolvedDir}/lerobot`
-    await saveQCResult(lerobotDir, result)
-    console.log('[handleQCConfirm] QC result saved to file')
-  } catch (e) {
-    console.error('[handleQCConfirm] Failed to save QC result:', e)
-    ElMessage.warning(`质检结果保存失败: ${(e as Error).message}`)
-  }
+  // 多人协作下，避免用全量覆盖保存（容易覆盖他人刚写入的结果）。
+  // 以每次 episode 更新为准，这里仅做一次强制同步，确保本地与全局一致。
+  await syncQCResultForCurrentDir({ showToast: false, force: true })
 }
 
 // ============ Merge ============
@@ -340,11 +488,24 @@ const qcStats = computed(() => {
   }
 })
 
-// 加载上次的 QC 结果
-const loadPreviousQCResult = async () => {
+const syncQCResultForCurrentDir = async (opts?: { showToast?: boolean; force?: boolean }) => {
+  const showToast = opts?.showToast ?? false
+  const force = opts?.force ?? false
+  const lerobotDir = currentLerobotDir.value
+
+  if (lastSyncedQCLerobotDir.value && lastSyncedQCLerobotDir.value !== lerobotDir) {
+    qcResult.value = null
+    qcResultTimestamp.value = null
+    lastSyncedQCLerobotDir.value = null
+  }
+
   try {
-    const resolvedDir = resolvePath(config.local_dir)
-    const lerobotDir = `${resolvedDir}/lerobot`
+    if (!force) {
+      if (lastSyncedQCLerobotDir.value === lerobotDir && qcResult.value) {
+        return
+      }
+    }
+
     const result = await loadQCResult(lerobotDir)
 
     if (result.exists && (result.passed.length > 0 || result.failed.length > 0)) {
@@ -352,16 +513,196 @@ const loadPreviousQCResult = async () => {
         passed: result.passed,
         failed: result.failed
       }
-      console.log('[loadPreviousQCResult] Loaded QC result:', result)
-      if (result.timestamp) {
-        const time = new Date(result.timestamp).toLocaleString()
-        ElMessage.info(`已加载上次质检结果 (${time}): ${result.passed.length} 通过, ${result.failed.length} 不通过`)
+      qcResultTimestamp.value = result.timestamp ?? null
+      lastSyncedQCLerobotDir.value = lerobotDir
+      console.log('[syncQCResultForCurrentDir] Loaded QC result:', result)
+
+      if (showToast) {
+        if (result.timestamp) {
+          const time = new Date(result.timestamp).toLocaleString()
+          ElMessage.info(`已同步质检结果 (${time}): ${result.passed.length} 通过, ${result.failed.length} 不通过`)
+        } else {
+          ElMessage.info(`已同步质检结果: ${result.passed.length} 通过, ${result.failed.length} 不通过`)
+        }
       }
+    } else {
+      qcResult.value = null
+      qcResultTimestamp.value = null
+      lastSyncedQCLerobotDir.value = null
     }
   } catch (e) {
-    console.error('[loadPreviousQCResult] Failed to load QC result:', e)
+    console.error('[syncQCResultForCurrentDir] Failed to load QC result:', e)
   }
 }
+
+// 加载上次的 QC 结果（兼容旧命名）
+const loadPreviousQCResult = async () => {
+  await syncQCResultForCurrentDir({ showToast: true })
+}
+
+const closeQCWebSocket = () => {
+  if (qcWsOpenTimer) {
+    clearTimeout(qcWsOpenTimer)
+    qcWsOpenTimer = null
+  }
+  if (qcWsReconnectTimer) {
+    clearTimeout(qcWsReconnectTimer)
+    qcWsReconnectTimer = null
+  }
+  if (qcWsHeartbeatTimer) {
+    clearInterval(qcWsHeartbeatTimer)
+    qcWsHeartbeatTimer = null
+  }
+
+  qcWsReconnectAttempts = 0
+  qcWsBaseDir = null
+
+  if (qcWs) {
+    try {
+      qcWs.onclose = null
+      qcWs.onerror = null
+      qcWs.onmessage = null
+      qcWs.onopen = null
+      qcWs.close()
+    } catch {
+      // ignore
+    }
+    qcWs = null
+  }
+}
+
+const scheduleQCWebSocketReconnect = (baseDir: string) => {
+  if (!baseDir) return
+  if (qcWsReconnectTimer) return
+
+  qcWsReconnectAttempts += 1
+  const delay = Math.min(1000 * 2 ** (qcWsReconnectAttempts - 1), 15000)
+
+  qcWsReconnectTimer = setTimeout(() => {
+    qcWsReconnectTimer = null
+    openQCWebSocket(baseDir)
+  }, delay)
+}
+
+const openQCWebSocket = (baseDir: string) => {
+  if (!baseDir) return
+
+  if (qcWsOpenTimer) {
+    clearTimeout(qcWsOpenTimer)
+    qcWsOpenTimer = null
+  }
+
+  // Debounce rapid directory changes to avoid hammering Vite ws proxy.
+  qcWsOpenTimer = setTimeout(() => {
+    qcWsOpenTimer = null
+
+    if (!baseDir) return
+
+    if (qcWs && qcWsBaseDir === baseDir && qcWs.readyState <= 1) {
+      return
+    }
+
+    closeQCWebSocket()
+    qcWsBaseDir = baseDir
+
+    const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
+    const query = new URLSearchParams({ base_dir: baseDir, client_id: qcClientId }).toString()
+
+    // Dev: connect directly to backend to avoid Vite ws proxy instability.
+    // Prod: same-origin (behind reverse proxy) is fine.
+    const apiPort = import.meta.env.VITE_API_PORT || '8000'
+    const apiHostEnv = import.meta.env.VITE_API_HOST || '127.0.0.1'
+
+    const isLocalApiHost = apiHostEnv === '127.0.0.1' || apiHostEnv === 'localhost'
+
+    // Dev: 直连后端（避免 Vite ws proxy 在跨机器/长连接下不稳定）。
+    // 若 VITE_API_HOST=localhost/127.0.0.1，则使用当前页面的 hostname（也就是提供前端的那台机器）。
+    // Prod: 同源（behind reverse proxy）。
+    const wsHost = import.meta.env.DEV
+      ? `${isLocalApiHost ? window.location.hostname : apiHostEnv}:${apiPort}`
+      : window.location.host
+
+    const url = `${protocol}://${wsHost}/api/upload/qc/ws?${query}`
+
+    try {
+      qcWs = new WebSocket(url)
+    } catch (e) {
+      console.warn('[QC WS] Failed to create WebSocket:', e)
+      scheduleQCWebSocketReconnect(baseDir)
+      return
+    }
+
+    qcWs.onopen = () => {
+      qcWsReconnectAttempts = 0
+
+      if (qcWsHeartbeatTimer) {
+        clearInterval(qcWsHeartbeatTimer)
+      }
+
+      qcWsHeartbeatTimer = setInterval(() => {
+        if (!qcWs || qcWs.readyState !== WebSocket.OPEN) return
+        try {
+          qcWs.send(JSON.stringify({ type: 'ping' }))
+        } catch {
+          // ignore
+        }
+      }, 10000)
+    }
+
+    qcWs.onmessage = (ev) => {
+      try {
+        const msg = JSON.parse(ev.data)
+        if (!msg || typeof msg !== 'object') return
+
+        if (msg.type === 'qc_result_updated') {
+          // qc_result_updated 代表“全量结果发生变化”（可能来自旧客户端）。
+          // 这里无法增量更新，只能拉全量。
+          const showToast = !msg.source_client_id || msg.source_client_id !== qcClientId
+          syncQCResultForCurrentDir({ showToast, force: true })
+          return
+        }
+
+        if (msg.type === 'qc_episode_updated') {
+          // 对单条 episode 的更新：先就地更新本地状态，保证 UI 立刻响应。
+          // 如果消息字段缺失，再回退到拉全量。
+          const episodeName = msg.episode_name
+          const status = msg.status
+          if (
+            typeof episodeName === 'string' &&
+            (status === 'passed' || status === 'failed' || status === 'pending')
+          ) {
+            updateLocalEpisodeStatus(episodeName, status)
+            if (typeof msg.timestamp === 'string') {
+              qcResultTimestamp.value = msg.timestamp
+            }
+          } else {
+            syncQCResultForCurrentDir({ showToast: false, force: true })
+          }
+          return
+        }
+
+        if (msg.type === 'qc_ws_connected') {
+          return
+        }
+      } catch (e) {
+        console.warn('[QC WS] Failed to parse message:', e)
+      }
+    }
+
+    qcWs.onclose = () => {
+      if (qcWsBaseDir === baseDir) {
+        scheduleQCWebSocketReconnect(baseDir)
+      }
+    }
+
+    qcWs.onerror = () => {
+      if (qcWsBaseDir === baseDir) {
+        scheduleQCWebSocketReconnect(baseDir)
+      }
+    }
+  }, 300)
+}
+
 
 // Auto-check on mount and start task polling
 onMounted(async () => {
@@ -388,12 +729,30 @@ onMounted(async () => {
   taskStore.fetchTasks()
   taskStore.fetchStats()
   taskStore.startPolling(3000)
-  // 4. Load previous QC result
+  // 4. Load previous QC result (for current local_dir)
   setTimeout(loadPreviousQCResult, 600)
 })
 
+// local_dir 变化时自动同步 qc_result.json（支持跨机器/重复打开同一数据集）
+watch(
+  () => currentLerobotDir.value,
+  (lerobotDir) => {
+    if (qcResultSyncTimer) {
+      clearTimeout(qcResultSyncTimer)
+      qcResultSyncTimer = null
+    }
+    qcResultSyncTimer = setTimeout(() => {
+      syncQCResultForCurrentDir({ showToast: true })
+    }, 300)
+
+    openQCWebSocket(lerobotDir)
+  },
+  { immediate: true }
+)
+
 onUnmounted(() => {
   taskStore.stopPolling()
+  closeQCWebSocket()
 })
 </script>
 
@@ -552,14 +911,17 @@ onUnmounted(() => {
     <TaskPreviewBar />
 
     <!-- QC Inspector Dialog -->
-    <QCInspector
-      v-model="showQCInspector"
-      :episodes="qcEpisodes"
-      :base-dir="`${resolvePath(config.local_dir)}/lerobot`"
-      :loading="qcLoading"
-      :initial-result="qcResult || undefined"
-      @confirm="handleQCConfirm"
-    />
+      <QCInspector
+        v-model="showQCInspector"
+        :episodes="qcEpisodes"
+        :base-dir="`${resolvePath(config.local_dir)}/lerobot`"
+        :loading="qcLoading"
+        :initial-result="qcResult || undefined"
+        @confirm="handleQCConfirm"
+        @episode-update="handleEpisodeUpdate"
+        @bulk-episode-update="handleBulkEpisodeUpdate"
+      />
+
 
     <!-- Merge Episode Selector -->
     <MergeEpisodeSelector

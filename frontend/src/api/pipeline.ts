@@ -270,19 +270,63 @@ export interface QCResultResponse {
   exists: boolean
 }
 
-// Save QC result to file
+export type QCEpisodeStatus = 'passed' | 'failed' | 'pending'
+
+export interface SaveQCResultOptions {
+  client_id?: string
+  base_timestamp?: string
+  force?: boolean
+}
+
+export interface SaveQCResultResponse {
+  success: boolean
+  file_path: string
+  dataset_key?: string
+  timestamp?: string
+  passed_count?: number
+  failed_count?: number
+}
+
 export const saveQCResult = async (
   baseDir: string,
-  result: QCResult
-): Promise<{ success: boolean; file_path: string }> => {
+  result: QCResult,
+  opts?: SaveQCResultOptions
+): Promise<SaveQCResultResponse> => {
   return api.post('/upload/save-qc-result', {
     base_dir: baseDir,
     passed: result.passed,
-    failed: result.failed
+    failed: result.failed,
+    client_id: opts?.client_id,
+    base_timestamp: opts?.base_timestamp,
+    force: opts?.force ?? false,
   })
 }
 
-// Load QC result from file
+export interface UpdateQCEpisodeResponse {
+  success: boolean
+  dataset_key?: string
+  timestamp?: string
+  passed_count?: number
+  failed_count?: number
+}
+
+export const updateQCEpisode = async (
+  baseDir: string,
+  episodeName: string,
+  status: QCEpisodeStatus,
+  opts?: { client_id?: string; base_timestamp?: string; base_status?: QCEpisodeStatus; force?: boolean }
+): Promise<UpdateQCEpisodeResponse> => {
+  return api.post('/upload/update-qc-episode', {
+    base_dir: baseDir,
+    episode_name: episodeName,
+    status,
+    client_id: opts?.client_id,
+    base_timestamp: opts?.base_timestamp,
+    base_status: opts?.base_status,
+    force: opts?.force ?? false,
+  })
+}
+
 export const loadQCResult = async (baseDir: string): Promise<QCResultResponse> => {
   return api.get('/upload/load-qc-result', { params: { base_dir: baseDir } })
 }
@@ -321,4 +365,3 @@ export const getVideoStreamUrl = (baseDir: string, episodeName: string, camera =
   const encodedEpisode = encodeURIComponent(episodeName)
   return `/api/upload/video-stream?base_dir=${encodedBaseDir}&episode_name=${encodedEpisode}&camera=${camera}`
 }
-

@@ -7,6 +7,7 @@ export default defineConfig(({ mode }) => {
   // 加载环境变量
   const env = loadEnv(mode, process.cwd(), '')
 
+  const apiHost = env.VITE_API_HOST || '127.0.0.1'
   const apiPort = env.VITE_API_PORT || '8000'
   const devPort = parseInt(env.VITE_DEV_PORT || '5173')
 
@@ -22,11 +23,12 @@ export default defineConfig(({ mode }) => {
       port: devPort,
       proxy: {
         '/api': {
-          target: `http://localhost:${apiPort}`,
+          target: `http://${apiHost}:${apiPort}`,
           changeOrigin: true,
+          ws: true,
         },
         '/health': {
-          target: `http://localhost:${apiPort}`,
+          target: `http://${apiHost}:${apiPort}`,
           changeOrigin: true,
         },
       },

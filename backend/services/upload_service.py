@@ -5,10 +5,12 @@
 """
 
 import json
+import hashlib
 import logging
 import os
 import subprocess
 import threading
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional, List, Tuple, Dict, Any
 from datetime import datetime
@@ -27,14 +29,23 @@ from backend.services.database import get_database
 class UploadService:
     """上传服务类"""
 
-    def __init__(self, mc_path: str = None):
+    def __init__(self, mc_path: Optional[str] = None):
         # 使用统一配置获取 mc 路径
         if mc_path is None:
             mc_path = settings.get_mc_path()
 
+        assert mc_path is not None
+
         self.mc_path = Path(mc_path)
         self.db = get_database()
         self._running_tasks: Dict[str, subprocess.Popen] = {}
+
+        # 缩略图缓存：避免重复解码 MP4（QC 重复打开同一目录时会非常慢）
+        # - 磁盘缓存：跨进程/重启复用
+        # - 内存缓存：同进程内更快
+        self._thumbnail_mem_cache: "OrderedDict[str, List[str]]" = OrderedDict()
+        self._thumbnail_mem_cache_lock = threading.Lock()
+        self._thumbnail_mem_cache_max_items = settings.THUMBNAIL_CACHE_MAX_ITEMS
 
     def check_mc(self) -> Tuple[bool, str]:
         """检查mc工具是否可用"""
@@ -173,8 +184,119 @@ class UploadService:
 
         return episodes_data
 
+    def _get_thumbnail_cache_dir(self) -> Path:
+        cache_dir = Path(settings.THUMBNAIL_CACHE_DIR).expanduser()
+        try:
+            cache_dir.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            # 缓存目录创建失败时，不影响主流程
+            pass
+        return cache_dir
+
+    def _build_thumbnail_cache_key(self, video_path: str, size: tuple) -> tuple[str, Dict[str, Any]]:
+        p = Path(video_path)
+        stat = p.stat()
+        resolved = str(p.resolve(strict=False))
+        quality = int(settings.JPEG_QUALITY)
+        w, h = int(size[0]), int(size[1])
+
+        # key 包含 mtime/size，文件被替换后自动失效
+        key_src = f"{resolved}|{stat.st_mtime_ns}|{stat.st_size}|{w}x{h}|q{quality}"
+        key = hashlib.sha1(key_src.encode("utf-8")).hexdigest()
+
+        meta = {
+            "version": 1,
+            "video_path": resolved,
+            "mtime_ns": stat.st_mtime_ns,
+            "size": stat.st_size,
+            "thumb_size": [w, h],
+            "jpeg_quality": quality,
+        }
+        return key, meta
+
+    def _mem_cache_get(self, key: str) -> Optional[List[str]]:
+        with self._thumbnail_mem_cache_lock:
+            value = self._thumbnail_mem_cache.get(key)
+            if value is None:
+                return None
+            self._thumbnail_mem_cache.move_to_end(key)
+            return value
+
+    def _mem_cache_set(self, key: str, thumbnails: List[str]) -> None:
+        with self._thumbnail_mem_cache_lock:
+            self._thumbnail_mem_cache[key] = thumbnails
+            self._thumbnail_mem_cache.move_to_end(key)
+            while len(self._thumbnail_mem_cache) > self._thumbnail_mem_cache_max_items:
+                self._thumbnail_mem_cache.popitem(last=False)
+
+    def _read_thumbnail_cache(self, cache_file: Path, expected: Dict[str, Any]) -> Optional[List[str]]:
+        try:
+            if not cache_file.exists():
+                return None
+            with open(cache_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            if not isinstance(data, dict):
+                return None
+            if data.get("version") != expected.get("version"):
+                return None
+            if data.get("video_path") != expected.get("video_path"):
+                return None
+            if data.get("mtime_ns") != expected.get("mtime_ns"):
+                return None
+            if data.get("size") != expected.get("size"):
+                return None
+            if data.get("thumb_size") != expected.get("thumb_size"):
+                return None
+            if data.get("jpeg_quality") != expected.get("jpeg_quality"):
+                return None
+
+            thumbs = data.get("thumbnails")
+            if not isinstance(thumbs, list) or not thumbs:
+                return None
+            return thumbs
+        except Exception:
+            return None
+
+    def _write_thumbnail_cache(self, cache_file: Path, meta: Dict[str, Any], thumbnails: List[str]) -> None:
+        try:
+            cache_file.parent.mkdir(parents=True, exist_ok=True)
+            tmp = cache_file.with_suffix(cache_file.suffix + ".tmp")
+            payload = dict(meta)
+            payload["thumbnails"] = thumbnails
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False)
+            tmp.replace(cache_file)
+        except Exception as e:
+            logger.debug("[UploadService] Failed to write thumbnail cache: %s", e)
+
     def extract_thumbnails(self, video_path: str, size: tuple = (160, 120)) -> List[str]:
-        """从视频提取 4 帧缩略图（第1帧、1/3帧、2/3帧、最后帧）"""
+        """从视频提取 4 帧缩略图（第1帧、1/3帧、2/3帧、最后帧），带磁盘/内存缓存"""
+
+        try:
+            key, meta = self._build_thumbnail_cache_key(video_path, size)
+        except Exception:
+            # stat/resolve 失败时直接走原始逻辑
+            return self._extract_thumbnails_raw(video_path, size)
+
+        mem = self._mem_cache_get(key)
+        if mem is not None:
+            return mem
+
+        cache_file = self._get_thumbnail_cache_dir() / f"{key}.json"
+        disk = self._read_thumbnail_cache(cache_file, meta)
+        if disk is not None:
+            self._mem_cache_set(key, disk)
+            return disk
+
+        thumbnails = self._extract_thumbnails_raw(video_path, size)
+        if thumbnails:
+            self._write_thumbnail_cache(cache_file, meta, thumbnails)
+            self._mem_cache_set(key, thumbnails)
+        return thumbnails
+
+    def _extract_thumbnails_raw(self, video_path: str, size: tuple = (160, 120)) -> List[str]:
+        """原始缩略图提取逻辑（无缓存）。"""
         import av
         import base64
         from io import BytesIO
@@ -201,7 +323,7 @@ class UploadService:
                 0,
                 max(0, total_frames // 3),
                 max(0, total_frames * 2 // 3),
-                max(0, total_frames - 1)
+                max(0, total_frames - 1),
             ]
 
             thumbnails = []
@@ -217,7 +339,7 @@ class UploadService:
                     img.thumbnail(size)
 
                     buffer = BytesIO()
-                    img.save(buffer, format='JPEG', quality=settings.JPEG_QUALITY)
+                    img.save(buffer, format="JPEG", quality=settings.JPEG_QUALITY)
                     thumbnails.append(
                         f"data:image/jpeg;base64,{base64.b64encode(buffer.getvalue()).decode()}"
                     )

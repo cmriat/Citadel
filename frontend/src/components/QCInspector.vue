@@ -7,7 +7,7 @@
 
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { Icon } from '@iconify/vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
 interface Episode {
   name: string
@@ -38,6 +38,8 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   (e: 'update:modelValue', value: boolean): void
   (e: 'confirm', result: QCResult): void
+  (e: 'episode-update', payload: { episodeName: string; status: 'passed' | 'failed' | 'pending' }): void
+  (e: 'bulk-episode-update', payload: { episodeName: string; status: 'passed' | 'failed' | 'pending'; baseStatus: 'passed' | 'failed' | 'pending' }[]): void
 }>()
 
 const visible = computed({
@@ -48,7 +50,6 @@ const visible = computed({
 // QC 状态: 'passed' | 'failed' | 'pending'
 const qcStatus = ref<Record<string, 'passed' | 'failed' | 'pending'>>({})
 const currentEpisode = ref<string | null>(null)
-const videoRef = ref<HTMLVideoElement | null>(null)
 const hasShownResumeHint = ref(false)
 
 // 相机切换
@@ -59,54 +60,79 @@ const cameras = [
 ]
 const currentCamera = ref('cam_env')
 
-// 初始化 QC 状态
-watch(() => props.episodes, (eps) => {
-  const newStatus: Record<string, 'passed' | 'failed' | 'pending'> = {}
-  let resumeCount = 0
+const resetQCState = () => {
+  qcStatus.value = {}
+  currentEpisode.value = null
+  currentCamera.value = 'cam_env'
+  hasShownResumeHint.value = false
+}
 
-  eps.forEach(ep => {
-    const existingStatus = qcStatus.value[ep.name]
-    if (existingStatus) {
-      newStatus[ep.name] = existingStatus
-    } else if (props.initialResult) {
-      if (props.initialResult.passed.includes(ep.name)) {
+const activeBaseDir = ref<string | null>(null)
+
+watch(visible, (val) => {
+  if (!val) {
+    activeBaseDir.value = null
+    resetQCState()
+    return
+  }
+
+  activeBaseDir.value = props.baseDir
+  resetQCState()
+})
+
+// 初始化 QC 状态（episodes / initialResult 可能异步到达）
+watch(
+  [() => props.episodes, () => props.initialResult, () => props.baseDir, () => visible.value],
+  ([eps, initialResult, baseDir, isVisible]) => {
+    if (!isVisible) return
+
+    if (activeBaseDir.value !== baseDir) {
+      activeBaseDir.value = baseDir
+      resetQCState()
+    }
+
+    const newStatus: Record<string, 'passed' | 'failed' | 'pending'> = {}
+    let resumeCount = 0
+
+    const passed = new Set(initialResult?.passed ?? [])
+    const failed = new Set(initialResult?.failed ?? [])
+
+    eps.forEach(ep => {
+      if (passed.has(ep.name)) {
         newStatus[ep.name] = 'passed'
         resumeCount++
-      } else if (props.initialResult.failed.includes(ep.name)) {
+      } else if (failed.has(ep.name)) {
         newStatus[ep.name] = 'failed'
         resumeCount++
       } else {
         newStatus[ep.name] = 'pending'
       }
-    } else {
-      newStatus[ep.name] = 'pending'
+    })
+
+    qcStatus.value = newStatus
+
+    if (resumeCount > 0 && !hasShownResumeHint.value && eps.length > 0) {
+      hasShownResumeHint.value = true
+      const pendingEpisodes = eps.filter(ep => newStatus[ep.name] === 'pending')
+      const firstPending = pendingEpisodes[0]
+
+      if (firstPending) {
+        currentEpisode.value = firstPending.name
+        ElMessage.info({
+          message: `已恢复上次进度: ${resumeCount} 个已标记，从 ${firstPending.name} 继续`,
+          duration: 4000
+        })
+      } else {
+        currentEpisode.value = eps[0]?.name || null
+        ElMessage.success({
+          message: `所有 ${resumeCount} 个 episode 已标记完成`,
+          duration: 3000
+        })
+      }
     }
-  })
-
-  qcStatus.value = newStatus
-
-  // 显示恢复提示并自动定位到第一个待检查的 episode
-  if (resumeCount > 0 && !hasShownResumeHint.value && eps.length > 0) {
-    hasShownResumeHint.value = true
-    const pendingEpisodes = eps.filter(ep => newStatus[ep.name] === 'pending')
-    const firstPending = pendingEpisodes[0]
-
-    if (firstPending) {
-      currentEpisode.value = firstPending.name
-      ElMessage.info({
-        message: `已恢复上次进度: ${resumeCount} 个已标记，从 ${firstPending.name} 继续`,
-        duration: 4000
-      })
-    } else {
-      // 所有都已标记，定位到第一个
-      currentEpisode.value = eps[0]?.name || null
-      ElMessage.success({
-        message: `所有 ${resumeCount} 个 episode 已标记完成`,
-        duration: 3000
-      })
-    }
-  }
-}, { immediate: true })
+  },
+  { immediate: true }
+)
 
 // 统计
 const stats = computed(() => {
@@ -130,22 +156,36 @@ const getVideoUrl = (episodeName: string, camera?: string): string => {
 // 当前视频 key（用于强制刷新 video 元素）
 const videoKey = computed(() => `${currentEpisode.value}-${currentCamera.value}`)
 
-// 播放视频
-const playVideo = (episodeName: string) => {
+const playVideo = async (episodeName: string) => {
+  const status = qcStatus.value[episodeName]
+  if (status && status !== 'pending') {
+    try {
+      await ElMessageBox.confirm(
+        `该 episode 已标记为「${status === 'passed' ? '通过' : '不通过'}」，是否继续查看/修改？`,
+        '提示',
+        {
+          confirmButtonText: '继续',
+          cancelButtonText: '取消',
+          type: 'warning',
+        }
+      )
+    } catch {
+      return
+    }
+  }
+
   currentEpisode.value = episodeName
 }
 
-// 标记通过
 const markPassed = (episodeName: string) => {
   qcStatus.value[episodeName] = 'passed'
-  // 自动跳转到下一个待检查的 episode
+  emit('episode-update', { episodeName, status: 'passed' })
   autoNextPending()
 }
 
-// 标记不通过
 const markFailed = (episodeName: string) => {
   qcStatus.value[episodeName] = 'failed'
-  // 自动跳转到下一个待检查的 episode
+  emit('episode-update', { episodeName, status: 'failed' })
   autoNextPending()
 }
 
@@ -172,17 +212,33 @@ const autoNextPending = () => {
 
 // 全部标记为通过
 const markAllPassed = () => {
+  const updates = Object.entries(qcStatus.value)
+    .filter(([_, s]) => s !== 'passed')
+    .map(([episodeName, baseStatus]) => ({ episodeName, status: 'passed' as const, baseStatus }))
+
   Object.keys(qcStatus.value).forEach(k => {
     qcStatus.value[k] = 'passed'
   })
+
+  if (updates.length > 0) {
+    emit('bulk-episode-update', updates)
+  }
   ElMessage.success(`已将 ${stats.value.total} 个 episode 标记为通过`)
 }
 
 // 重置所有状态
 const resetAll = () => {
+  const updates = Object.entries(qcStatus.value)
+    .filter(([_, s]) => s !== 'pending')
+    .map(([episodeName, baseStatus]) => ({ episodeName, status: 'pending' as const, baseStatus }))
+
   Object.keys(qcStatus.value).forEach(k => {
     qcStatus.value[k] = 'pending'
   })
+
+  if (updates.length > 0) {
+    emit('bulk-episode-update', updates)
+  }
   ElMessage.info('已重置所有状态')
 }
 
@@ -278,13 +334,7 @@ const navigateNext = () => {
 }
 
 const toggleVideoPlay = () => {
-  if (videoRef.value) {
-    if (videoRef.value.paused) {
-      videoRef.value.play()
-    } else {
-      videoRef.value.pause()
-    }
-  }
+  // 三路视频并排后不再支持单一 videoRef 控制，保留空实现以兼容快捷键分支
 }
 
 onMounted(() => {
@@ -295,12 +345,6 @@ onUnmounted(() => {
   window.removeEventListener('keydown', handleKeyDown)
 })
 
-// 关闭时重置提示状态
-watch(visible, (val) => {
-  if (!val) {
-    hasShownResumeHint.value = false
-  }
-})
 </script>
 
 <template>
