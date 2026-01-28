@@ -10,7 +10,7 @@ from typing import Literal
 
 import numpy as np
 
-from .config import LEFT_GRIPPER_DIM, RIGHT_GRIPPER_DIM
+from .robot_config import get_robot_config, RobotConfig
 from .data_loader import DatasetLoader
 from .signal_processing import SignalProcessor, AlignmentEvent
 from .video_tracker import VideoTracker
@@ -58,8 +58,9 @@ class AlignmentAnalyzer:
 
     def __init__(self, dataset_dir: str | Path,
                  detection_mode: Literal["roi", "black", "color"] = "roi",
-                 camera: str = "cam_left_wrist",
+                 camera: str = None,
                  gripper: Literal["left", "right"] = "left",
+                 robot_type: str = None,
                  use_denoise: bool = False,
                  denoise_method: str = "state_guided"):
         """
@@ -68,25 +69,36 @@ class AlignmentAnalyzer:
         Args:
             dataset_dir: Path to LeRobot dataset
             detection_mode: Video tracking method ("roi", "black", "color")
-            camera: Camera to analyze
+            camera: Camera to analyze (default: from robot config)
             gripper: Gripper to analyze ("left" or "right")
+            robot_type: Override auto-detected robot type
             use_denoise: Whether to apply denoising
             denoise_method: Denoising method
         """
         self.dataset_dir = Path(dataset_dir)
         self.detection_mode = detection_mode
-        self.camera = camera
-        self.gripper_dim = LEFT_GRIPPER_DIM if gripper == "left" else RIGHT_GRIPPER_DIM
+        self.gripper = gripper
         self.use_denoise = use_denoise
         self.denoise_method = denoise_method
 
-        # Initialize components
+        # Initialize data loader first to get dataset info
         self.loader = DatasetLoader(dataset_dir)
         self.format_info = self.loader.format_info
         self.fps = self.format_info.fps
-        self.robot_type = self.format_info.robot_type
 
-        self.tracker = VideoTracker(detection_mode, self.robot_type, camera)
+        # Get robot config (override or auto-detect)
+        detected_robot = self.format_info.robot_type
+        self.robot_type = robot_type or detected_robot
+        self.robot_config: RobotConfig = get_robot_config(self.robot_type)
+
+        # Use robot config for gripper dimension
+        self.gripper_dim = self.robot_config.get_gripper_dim(gripper)
+
+        # Use robot config for default camera if not specified
+        self.camera = camera or self.robot_config.get_default_camera()
+
+        # Initialize other components
+        self.tracker = VideoTracker(detection_mode, self.robot_type, self.camera)
         self.signal_processor = SignalProcessor(self.fps)
         self.visualizer = AlignmentVisualizer()
 

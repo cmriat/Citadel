@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from .analyzer import AlignmentAnalyzer
+from .robot_config import list_robot_types, get_robot_config
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -16,17 +17,25 @@ def create_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-    # Analyze single episode
-    python -m filter_lerobot.alignment /path/to/dataset
+    # Analyze single episode (auto-detect robot type)
+    python -m alignment /path/to/dataset
+
+    # Analyze with specific robot type
+    python -m alignment /path/to/dataset --robot-type aloha
 
     # Analyze with black region detection (for ALOHA)
-    python -m filter_lerobot.alignment /path/to/dataset --black-detection
+    python -m alignment /path/to/dataset --black-detection
 
     # Analyze with denoising
-    python -m filter_lerobot.alignment /path/to/dataset --denoise
+    python -m alignment /path/to/dataset --denoise
 
     # Analyze all episodes
-    python -m filter_lerobot.alignment /path/to/dataset --all-episodes
+    python -m alignment /path/to/dataset --all-episodes
+
+Supported robot types:
+    - airbot_play: Default robot with orange gripper
+    - aloha: ALOHA robot with black gripper
+    - galaxea_r1_lite: Galaxea R1 Lite with _rgb camera suffix
 """
     )
 
@@ -38,8 +47,15 @@ Examples:
                         help="Output directory (default: dataset_dir/alignment_analysis)")
     parser.add_argument("--all-episodes", "-a", action="store_true",
                         help="Analyze all episodes")
-    parser.add_argument("--camera", "-c", type=str, default="cam_left_wrist",
-                        help="Camera to use (default: cam_left_wrist)")
+
+    # Robot type option
+    parser.add_argument("--robot-type", "-r", type=str, default=None,
+                        choices=list_robot_types(),
+                        help="Override robot type (default: auto-detect from dataset)")
+
+    # Camera option (default from robot config)
+    parser.add_argument("--camera", "-c", type=str, default=None,
+                        help="Camera to use (default: from robot config)")
     parser.add_argument("--gripper", "-g", type=str, default="left",
                         choices=["left", "right"],
                         help="Gripper to analyze (default: left)")
@@ -82,7 +98,23 @@ def main(args: list[str] = None) -> int:
     output_dir = Path(parsed.output) if parsed.output else None
 
     print(f"Dataset: {dataset_dir}")
-    print(f"Camera: {parsed.camera}")
+
+    # Show robot type info
+    if parsed.robot_type:
+        print(f"Robot type: {parsed.robot_type} (override)")
+        robot_config = get_robot_config(parsed.robot_type)
+    else:
+        print(f"Robot type: auto-detect")
+        robot_config = None
+
+    # Show camera info
+    if parsed.camera:
+        print(f"Camera: {parsed.camera}")
+    elif robot_config:
+        print(f"Camera: {robot_config.get_default_camera()} (from robot config)")
+    else:
+        print(f"Camera: (will auto-detect)")
+
     print(f"Gripper: {parsed.gripper}")
     print(f"Detection mode: {detection_mode}")
     if parsed.denoise:
@@ -94,9 +126,14 @@ def main(args: list[str] = None) -> int:
             detection_mode=detection_mode,
             camera=parsed.camera,
             gripper=parsed.gripper,
+            robot_type=parsed.robot_type,
             use_denoise=parsed.denoise,
             denoise_method=parsed.denoise_method
         )
+
+        # Print detected info
+        print(f"\nDetected: robot={analyzer.robot_type}, camera={analyzer.camera}, "
+              f"gripper_dim={analyzer.gripper_dim}")
 
         if parsed.all_episodes:
             analyzer.analyze_all_episodes(output_dir)

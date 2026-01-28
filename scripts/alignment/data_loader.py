@@ -11,7 +11,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from .config import DEFAULT_FPS
+from .robot_config import get_robot_config, DEFAULT_CONFIG
 
 
 @dataclass
@@ -40,9 +40,11 @@ class DatasetLoader:
             with open(info_path, "r") as f:
                 info = json.load(f)
 
-            version = info.get("codebase_version", "v2.0")
-            fps = info.get("fps", DEFAULT_FPS)
             robot_type = info.get("robot_type", "default")
+            robot_config = get_robot_config(robot_type)
+
+            version = info.get("codebase_version", "v2.0")
+            fps = info.get("fps", robot_config.video.fps)
 
             if version.startswith("v3"):
                 return DatasetFormat(
@@ -56,18 +58,34 @@ class DatasetLoader:
                     ),
                     video_path_pattern=info.get(
                         "video_path",
-                        "videos/{video_key}/chunk-{chunk_index:03d}/file-{file_index:03d}.mp4"
+                        robot_config.video.path_pattern
                     ),
                 )
 
-        # Legacy format (v2.0 or earlier)
+            # v2.x format - read config from info.json
+            return DatasetFormat(
+                version=version,
+                fps=fps,
+                robot_type=robot_type,
+                is_v3=False,
+                data_path_pattern=info.get(
+                    "data_path",
+                    "data/chunk-000/episode_{episode:06d}.parquet"
+                ),
+                video_path_pattern=info.get(
+                    "video_path",
+                    robot_config.video.path_pattern
+                ),
+            )
+
+        # Legacy format (no info.json)
         return DatasetFormat(
             version="v2.0",
-            fps=DEFAULT_FPS,
+            fps=DEFAULT_CONFIG.video.fps,
             robot_type="default",
             is_v3=False,
             data_path_pattern="data/chunk-000/episode_{episode:06d}.parquet",
-            video_path_pattern="videos/chunk-000/observation.images.{camera}/episode_{episode:06d}.mp4",
+            video_path_pattern=DEFAULT_CONFIG.video.path_pattern,
         )
 
     def load_episode(self, episode: int) -> tuple[np.ndarray, np.ndarray, int]:
@@ -119,14 +137,66 @@ class DatasetLoader:
         return self._get_v2_video_path(episode, camera)
 
     def _get_v2_video_path(self, episode: int, camera: str) -> Path:
-        """Get video path for v2.0 format."""
-        video_path = (
-            self.dataset_dir / "videos" / "chunk-000" /
-            f"observation.images.{camera}" / f"episode_{episode:06d}.mp4"
+        """
+        Get video path for v2.0/v2.1 format.
+
+        Tries multiple path patterns to support different dataset structures:
+        1. Pattern from info.json video_path template
+        2. Standard v2.0: videos/chunk-000/observation.images.{camera}/
+        3. R1_lite style: chunk-000/observation.images.{camera}/
+        4. With _rgb suffix variations
+        """
+        video_key = f"observation.images.{camera}"
+
+        # Build candidate paths to try
+        candidate_paths = []
+
+        # 1. Try pattern from info.json (if available)
+        if self.format_info.video_path_pattern:
+            try:
+                # Handle different placeholder formats
+                pattern = self.format_info.video_path_pattern
+                # Replace {video_key} placeholder
+                pattern = pattern.replace("{video_key}", video_key)
+                # Replace episode placeholders
+                pattern = pattern.replace("{episode_chunk:03d}", "000")
+                pattern = pattern.replace("{episode_index:06d}", f"{episode:06d}")
+                candidate_paths.append(self.dataset_dir / pattern)
+            except (KeyError, ValueError):
+                pass
+
+        # 2. Standard v2.0 pattern: videos/chunk-000/observation.images.{camera}/
+        candidate_paths.append(
+            self.dataset_dir / "videos" / "chunk-000" / video_key / f"episode_{episode:06d}.mp4"
         )
-        if not video_path.exists():
-            raise FileNotFoundError(f"Video not found: {video_path}")
-        return video_path
+
+        # 3. R1_lite style: chunk-000/observation.images.{camera}/ (no videos/ prefix)
+        candidate_paths.append(
+            self.dataset_dir / "chunk-000" / video_key / f"episode_{episode:06d}.mp4"
+        )
+
+        # 4. Try with _rgb suffix if camera name doesn't already have it
+        if not camera.endswith("_rgb"):
+            video_key_rgb = f"observation.images.{camera}_rgb"
+            candidate_paths.append(
+                self.dataset_dir / "videos" / "chunk-000" / video_key_rgb / f"episode_{episode:06d}.mp4"
+            )
+            candidate_paths.append(
+                self.dataset_dir / "chunk-000" / video_key_rgb / f"episode_{episode:06d}.mp4"
+            )
+
+        # Try each candidate path
+        for path in candidate_paths:
+            if path.exists():
+                return path
+
+        # If none found, raise with helpful message
+        tried_paths = "\n  - ".join(str(p) for p in candidate_paths)
+        raise FileNotFoundError(
+            f"Video not found for episode {episode}, camera '{camera}'.\n"
+            f"Tried paths:\n  - {tried_paths}\n"
+            f"Available cameras in dataset may have different names (e.g., '{camera}_rgb')."
+        )
 
     def _get_v3_video_path(self, episode: int, camera: str) -> Path:
         """Get video path for v3.0 format."""

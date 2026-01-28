@@ -14,7 +14,7 @@ from typing import Literal
 import av
 import numpy as np
 
-from .config import get_roi_config, COLOR_THRESHOLD
+from .robot_config import get_robot_config
 
 
 class BaseTracker(ABC):
@@ -29,8 +29,11 @@ class BaseTracker(ABC):
 class ROITracker(BaseTracker):
     """ROI-based gray frame difference tracker."""
 
-    def __init__(self, robot_type: str = "default", camera: str = "cam_left_wrist"):
-        roi_config = get_roi_config(robot_type, camera)
+    def __init__(self, robot_type: str = "default", camera: str = None):
+        config = get_robot_config(robot_type)
+        # Use default camera from robot config if not specified
+        camera = camera or config.get_default_camera()
+        roi_config = config.roi.get_for_camera(camera)
         self.roi_y = roi_config["y"]
         self.roi_x = roi_config["x"]
 
@@ -74,12 +77,15 @@ class ROITracker(BaseTracker):
 class BlackRegionTracker(BaseTracker):
     """Black region detection tracker for dark grippers."""
 
-    def __init__(self, robot_type: str = "default", camera: str = "cam_left_wrist",
+    def __init__(self, robot_type: str = "default", camera: str = None,
                  threshold: int = None):
-        roi_config = get_roi_config(robot_type, camera)
+        config = get_robot_config(robot_type)
+        # Use default camera from robot config if not specified
+        camera = camera or config.get_default_camera()
+        roi_config = config.roi.get_for_camera(camera)
         self.roi_y = roi_config["y"]
         self.roi_x = roi_config["x"]
-        self.threshold = threshold or COLOR_THRESHOLD["black"]["max_value"]
+        self.threshold = threshold or config.color_threshold.black_max_value
 
     def compute_diffs(self, video_path: Path, frame_range: tuple[int, int] = (0, -1)) -> np.ndarray:
         container = av.open(str(video_path))
@@ -122,12 +128,22 @@ class BlackRegionTracker(BaseTracker):
 
 
 class ColorTracker(BaseTracker):
-    """Orange color detection tracker."""
+    """Orange color detection tracker - now robot-aware."""
 
-    def __init__(self, robot_type: str = "default"):
-        # Use lower half for color detection
-        self.roi_y = (0.5, 1.0)
-        self.color_config = COLOR_THRESHOLD["orange"]
+    def __init__(self, robot_type: str = "default", camera: str = None):
+        config = get_robot_config(robot_type)
+        # Use robot-specific color ROI
+        self.roi_y = config.color_threshold.color_roi_y
+        # Use robot-specific color thresholds
+        ct = config.color_threshold
+        self.color_config = {
+            "r_min": ct.orange_r_range[0],
+            "r_max": ct.orange_r_range[1],
+            "g_min": ct.orange_g_range[0],
+            "g_max": ct.orange_g_range[1],
+            "b_min": ct.orange_b_range[0],
+            "b_max": ct.orange_b_range[1],
+        }
 
     def compute_diffs(self, video_path: Path, frame_range: tuple[int, int] = (0, -1)) -> np.ndarray:
         container = av.open(str(video_path))
@@ -148,8 +164,8 @@ class ColorTracker(BaseTracker):
             img = frame.to_ndarray(format="rgb24").astype(np.float32)
             h, _w = img.shape[:2]
 
-            # Focus on lower part
-            roi = img[int(h * self.roi_y[0]):, :]
+            # Focus on configured region
+            roi = img[int(h * self.roi_y[0]):int(h * self.roi_y[1]), :]
             r, g, b = roi[:, :, 0], roi[:, :, 1], roi[:, :, 2]
 
             # Orange detection
@@ -184,7 +200,7 @@ class VideoTracker:
     METHODS = Literal["roi", "black", "color"]
 
     def __init__(self, method: str = "roi", robot_type: str = "default",
-                 camera: str = "cam_left_wrist"):
+                 camera: str = None):
         self.method = method
         self.robot_type = robot_type
         self.camera = camera
@@ -197,7 +213,7 @@ class VideoTracker:
         elif self.method == "black":
             return BlackRegionTracker(self.robot_type, self.camera)
         elif self.method == "color":
-            return ColorTracker(self.robot_type)
+            return ColorTracker(self.robot_type, self.camera)
         else:
             raise ValueError(f"Unknown tracking method: {self.method}")
 
@@ -210,7 +226,7 @@ class VideoTracker:
         """Human-readable description of tracking method."""
         descriptions = {
             "roi": f"ROI-based frame diff ({self.robot_type} gripper region)",
-            "black": "Black region detection",
-            "color": "Orange color tracking",
+            "black": f"Black region detection ({self.robot_type})",
+            "color": f"Orange color tracking ({self.robot_type})",
         }
         return descriptions.get(self.method, self.method)
