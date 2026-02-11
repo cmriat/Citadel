@@ -128,7 +128,7 @@ def detect_gap_segments(
     cameras_info: Dict[str, np.ndarray],
     gap_factor: float = 5.0,
     min_segment_frames: int = 30
-) -> List[np.ndarray]:
+) -> Tuple[List[np.ndarray], List[Dict]]:
     """检测所有相机的严重跳帧，将 reference_timestamps 切割为有效片段。
 
     Args:
@@ -138,11 +138,15 @@ def detect_gap_segments(
         min_segment_frames: 最小有效片段帧数
 
     Returns:
-        有效片段的 reference_timestamps 列表（每个元素是一个连续时间段的时间戳数组）
-        空列表表示整个 episode 不可用
+        (segments, gap_details):
+        - segments: 有效片段的 reference_timestamps 列表（每个元素是一个连续时间段的时间戳数组），
+          空列表表示整个 episode 不可用
+        - gap_details: 每个跳帧的详情列表，每项包含:
+          camera, frame_index, gap_ms, skipped_reference_indices
     """
     # 1. 收集所有相机的跳帧区间
     all_gap_intervals: List[Tuple[float, float]] = []
+    gap_details: List[Dict] = []
 
     for cam_name, cam_ts in cameras_info.items():
         if len(cam_ts) < 2:
@@ -160,10 +164,21 @@ def detect_gap_segments(
                   f"(阈值={gap_threshold/1e6:.1f}ms)")
             all_gap_intervals.append((gap_start_ts, gap_end_ts))
 
+            # 计算被跳过的 reference 帧索引
+            skipped_mask = (reference_timestamps >= gap_start_ts) & (reference_timestamps <= gap_end_ts)
+            skipped_indices = np.where(skipped_mask)[0].tolist()
+
+            gap_details.append({
+                "camera": cam_name,
+                "frame_index": int(idx),
+                "gap_ms": round(float(gap_duration_ms), 1),
+                "skipped_reference_indices": skipped_indices
+            })
+
     # 无跳帧 → 返回完整时间戳
     if not all_gap_intervals:
         print("  ✅ 无严重跳帧，保留完整 episode")
-        return [reference_timestamps]
+        return [reference_timestamps], []
 
     # 2. 合并重叠的跳帧区间（union）
     all_gap_intervals.sort(key=lambda x: x[0])
@@ -188,7 +203,7 @@ def detect_gap_segments(
     valid_indices = np.where(current_mask)[0]
     if len(valid_indices) == 0:
         print("  ❌ 所有帧均在跳帧区间内，episode 不可用")
-        return []
+        return [], gap_details
 
     # 检测连续索引的断点（非连续处即为切割点）
     breaks = np.where(np.diff(valid_indices) > 1)[0] + 1
@@ -214,7 +229,7 @@ def detect_gap_segments(
         duration_s = (seg[-1] - seg[0]) / 1e9
         print(f"     片段 {i}: {len(seg)} 帧, {duration_s:.2f}s")
 
-    return valid_segments
+    return valid_segments, gap_details
 
 
 def map_master_eef_to_slave_mapping(master_eef: np.ndarray, slave_mapping_stats: dict) -> np.ndarray:
@@ -253,7 +268,7 @@ def load_episode_v1_format(
     alignment_method: str = 'nearest',
     gap_factor: float = 5.0,
     min_segment_frames: int = 30
-) -> List[Dict]:
+) -> Tuple[List[Dict], Dict]:
     """加载online_test_hdf5_v1格式的Episode数据，支持跳帧切割
 
     当某相机出现严重跳帧时，在跳帧处切割 episode，保留所有有效片段
@@ -271,15 +286,18 @@ def load_episode_v1_format(
         min_segment_frames: 最小有效片段帧数，低于此阈值丢弃
 
     Returns:
-        有效片段列表，每个元素为:
-        {
-            'images_env': [N, H, W, 3] uint8,
-            'images_left_wrist': [N, H, W, 3] uint8,
-            'images_right_wrist': [N, H, W, 3] uint8,
-            'state': [N, 14] float32,
-            'action': [N, 14] float32
-        }
-        空列表表示整个 episode 不可用
+        (segments, quality_meta):
+        - segments: 有效片段列表，每个元素为:
+          {
+              'images_env': [N, H, W, 3] uint8,
+              'images_left_wrist': [N, H, W, 3] uint8,
+              'images_right_wrist': [N, H, W, 3] uint8,
+              'state': [N, 14] float32,
+              'action': [N, 14] float32
+          }
+          空列表表示整个 episode 不可用
+        - quality_meta: 质量元数据字典，包含 cameras、reference_camera、
+          boundary_trimmed_frames、gaps、output_frames
     """
     with h5py.File(ep_path, "r") as f:
         # ========== 1. 确定参考基准时间戳 (最少帧数相机) ==========
@@ -288,6 +306,17 @@ def load_episode_v1_format(
             'cam_left_wrist': f["images/cam_left_wrist/timestamps"][:],
             'cam_right_wrist': f["images/cam_right_wrist/timestamps"][:]
         }
+
+        # 收集相机质量信息
+        cameras_quality: Dict[str, Dict] = {}
+        for cam_name, cam_ts in cameras_info.items():
+            cam_meta: Dict = {"original_frames": int(len(cam_ts))}
+            if len(cam_ts) >= 2:
+                median_iv = float(np.median(np.diff(cam_ts)) / 1e6)
+                cam_meta["median_interval_ms"] = round(median_iv, 2)
+            else:
+                cam_meta["median_interval_ms"] = 0.0
+            cameras_quality[cam_name] = cam_meta
 
         # 找到帧数最少的相机作为基准
         min_camera = min(cameras_info, key=lambda k: len(cameras_info[k]))
@@ -332,7 +361,7 @@ def load_episode_v1_format(
         valid_mask = reference_timestamps <= tolerance_end_ts
 
         # 统计裁剪情况
-        trimmed_end = np.sum(reference_timestamps > tolerance_end_ts)
+        trimmed_end = int(np.sum(reference_timestamps > tolerance_end_ts))
 
         if trimmed_end > 0:
             # 计算超出部分的时间
@@ -352,7 +381,7 @@ def load_episode_v1_format(
 
         # ========== 1.6 跳帧切割 ==========
         print("\n🔍 跳帧检测:")
-        segments = detect_gap_segments(
+        segments, gap_details = detect_gap_segments(
             reference_timestamps, cameras_info,
             gap_factor=gap_factor,
             min_segment_frames=min_segment_frames
@@ -360,7 +389,14 @@ def load_episode_v1_format(
 
         if not segments:
             print("\n❌ Episode 无有效片段")
-            return []
+            quality_meta = {
+                "cameras": cameras_quality,
+                "reference_camera": min_camera,
+                "boundary_trimmed_frames": trimmed_end,
+                "gaps": gap_details,
+                "output_frames": 0
+            }
+            return [], quality_meta
 
         # ========== 2. 全量解码图像（只做一次） ==========
         print("\n📸 图像解码:")
@@ -508,7 +544,15 @@ def load_episode_v1_format(
         total_frames = sum(len(r['state']) for r in results)
         print(f"\n✅ 数据加载完成: {len(results)} 个片段, 共 {total_frames} 帧\n")
 
-        return results
+        quality_meta = {
+            "cameras": cameras_quality,
+            "reference_camera": min_camera,
+            "boundary_trimmed_frames": trimmed_end,
+            "gaps": gap_details,
+            "output_frames": total_frames
+        }
+
+        return results, quality_meta
 
 
 def encode_video_frames(frames: np.ndarray, output_path: Path, fps: int = 30):
@@ -873,9 +917,9 @@ def convert_hdf5_to_lerobot_v21(
     # 1. Create output directory structure
     create_output_structure(output_dir)
 
-    # 2. Load HDF5 data (returns list of segments)
+    # 2. Load HDF5 data (returns list of segments + quality metadata)
     print("\nLoading HDF5 data...")
-    segments = load_episode_v1_format(
+    segments, quality_meta = load_episode_v1_format(
         hdf5_path,
         alignment_method=alignment_method,
         gap_factor=gap_factor,
@@ -884,6 +928,15 @@ def convert_hdf5_to_lerobot_v21(
 
     if not segments:
         print("\n⚠️  Episode 无有效片段，跳过")
+        # 即使无有效片段，仍然写入 quality_report.json
+        quality_report = {
+            "source_file": hdf5_path.name,
+            **quality_meta
+        }
+        report_path = output_dir / "quality_report.json"
+        with open(report_path, "w", encoding="utf-8") as f:
+            json.dump(quality_report, f, indent=4, ensure_ascii=False)
+        print(f"  ✓ {report_path}")
         return
 
     num_episodes = len(segments)
@@ -943,6 +996,16 @@ def convert_hdf5_to_lerobot_v21(
     generate_episodes_stats_jsonl(output_dir, all_stats)
     print("  ✓ meta/episodes_stats.jsonl")
 
+    # 5. Write quality report JSON
+    quality_report = {
+        "source_file": hdf5_path.name,
+        **quality_meta
+    }
+    report_path = output_dir / "quality_report.json"
+    with open(report_path, "w", encoding="utf-8") as f:
+        json.dump(quality_report, f, indent=4, ensure_ascii=False)
+    print(f"  ✓ {report_path}")
+
     print(f"\n✅ Conversion complete!")
     print(f"   Output: {output_dir}")
     print(f"   Episodes: {num_episodes}")
@@ -959,7 +1022,7 @@ def main(
     fps: int = 30,
     task: str = "Fold the laundry",
     alignment_method: str = "nearest",
-    gap_factor: float = 5.0,
+    gap_factor: float = 4.5,
     min_segment_frames: int = 30
 ):
     """Main entry point.

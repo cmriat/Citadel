@@ -16,6 +16,7 @@ HDF5转换命令行工具
     TIMEOUT_CONVERT: 单文件转换超时秒数 (默认: 300)
 """
 
+import json
 import os
 import tyro
 from pathlib import Path
@@ -50,7 +51,9 @@ def convert_single_file(
     robot_type: str,
     fps: int,
     task: str,
-    alignment_method: str
+    alignment_method: str,
+    gap_factor: float,
+    min_segment_frames: int
 ) -> Tuple[bool, str, float]:
     """转换单个HDF5文件
 
@@ -61,6 +64,8 @@ def convert_single_file(
         fps: 帧率
         task: 任务描述
         alignment_method: 对齐方法 ('nearest' 或 'linear')
+        gap_factor: 跳帧判定倍数
+        min_segment_frames: 最小有效片段帧数
 
     Returns:
         (是否成功, 错误信息, 耗时秒数)
@@ -77,7 +82,9 @@ def convert_single_file(
         "--robot-type", robot_type,
         "--fps", str(fps),
         "--task", task,
-        "--alignment-method", alignment_method
+        "--alignment-method", alignment_method,
+        "--gap-factor", str(gap_factor),
+        "--min-segment-frames", str(min_segment_frames)
     ]
 
     try:
@@ -111,14 +118,16 @@ def convert_single_file(
 
 
 def convert(
-    input_dir: str = "/pfs/pfs-uaDOJM/home/maozan/code/data/0203_qz2_pants/raw",
-    output_dir: str = "/pfs/pfs-uaDOJM/home/maozan/code/data/0203_qz2_pants/lerobot",
+    input_dir: str = "/pfs/pfs-uaDOJM/home/maozan/code/data/fold_laundry_v02/0210_qz2/raw",
+    output_dir: str = "/pfs/pfs-uaDOJM/home/maozan/code/data/fold_laundry_v02/0210_qz2/lerobot",
     robot_type: Optional[str] = None,
     fps: Optional[int] = None,
     task: Optional[str] = None,
     parallel_jobs: Optional[int] = None,
     file_pattern: Optional[str] = None,
-    alignment_method: Optional[str] = "linear"
+    alignment_method: Optional[str] = "linear",
+    gap_factor: Optional[float] = None,
+    min_segment_frames: Optional[int] = None
 ):
     """
     批量转换HDF5文件为LeRobot v2.1格式
@@ -133,6 +142,8 @@ def convert(
         file_pattern: 文件匹配模式（默认从环境变量 DEFAULT_FILE_PATTERN 读取，或使用 'episode_*.h5'）
         alignment_method: 关节对齐方法（默认从环境变量 DEFAULT_ALIGNMENT_METHOD 读取，或使用 'nearest'）
                          可选值: 'nearest' (最近邻) 或 'linear' (线性插值)
+        gap_factor: 跳帧判定倍数，帧间隔 > 正常间隔 × gap_factor 视为严重跳帧（默认 4.5）
+        min_segment_frames: 最小有效片段帧数，低于此阈值丢弃（默认 30）
     """
     # 从环境变量获取默认值
     if robot_type is None:
@@ -147,6 +158,10 @@ def convert(
         file_pattern = _get_env("DEFAULT_FILE_PATTERN", "episode_*.h5")
     if alignment_method is None:
         alignment_method = _get_env("DEFAULT_ALIGNMENT_METHOD", "linear")
+    if gap_factor is None:
+        gap_factor = float(_get_env("DEFAULT_GAP_FACTOR", "4.5"))
+    if min_segment_frames is None:
+        min_segment_frames = _get_env_int("DEFAULT_MIN_SEGMENT_FRAMES", 30)
 
     print("=" * 80)
     print(colored("🔄 HDF5批量转换工具 - Citadel Release", "cyan", attrs=["bold"]))
@@ -159,6 +174,8 @@ def convert(
     print(f"并发数: {parallel_jobs}")
     print(f"文件模式: {file_pattern}")
     print(f"对齐方法: {alignment_method}")
+    print(f"跳帧倍数: {gap_factor}")
+    print(f"最小片段帧数: {min_segment_frames}")
     print("=" * 80)
 
     # 1. 扫描HDF5文件
@@ -200,7 +217,9 @@ def convert(
                 robot_type,
                 fps,
                 task,
-                alignment_method
+                alignment_method,
+                gap_factor,
+                min_segment_frames
             ): hdf5_file
             for hdf5_file in hdf5_files
         }
@@ -268,6 +287,38 @@ def convert(
     else:
         print(colored(f"⚠️  {failed_count} 个文件转换失败，请检查错误信息", "yellow", attrs=["bold"]))
     print("=" * 80)
+
+    # 6. 汇总所有 episode 的 quality_report.json
+    print(f"\n📊 汇总质量报告...")
+    episode_reports = []
+    for report_path in sorted(output_path.glob("*/quality_report.json")):
+        try:
+            with open(report_path, "r", encoding="utf-8") as rf:
+                episode_reports.append(json.load(rf))
+        except (json.JSONDecodeError, OSError) as e:
+            print(colored(f"  ⚠️  读取失败: {report_path} ({e})", "yellow"))
+
+    if episode_reports:
+        total_output_frames = sum(r.get("output_frames", 0) for r in episode_reports)
+        episodes_with_gaps = sum(1 for r in episode_reports if r.get("gaps"))
+
+        quality_summary = {
+            "total_episodes": len(episode_reports),
+            "total_output_frames": total_output_frames,
+            "episodes_with_gaps": episodes_with_gaps,
+            "episodes": episode_reports
+        }
+
+        summary_path = output_path / "quality_summary.json"
+        with open(summary_path, "w", encoding="utf-8") as sf:
+            json.dump(quality_summary, sf, indent=4, ensure_ascii=False)
+
+        print(f"  ✓ {summary_path}")
+        print(f"    汇总 {len(episode_reports)} 个 episode, "
+              f"共 {total_output_frames} 帧, "
+              f"{episodes_with_gaps} 个有跳帧")
+    else:
+        print(colored("  ⚠️  未找到任何 quality_report.json", "yellow"))
 
 
 if __name__ == "__main__":

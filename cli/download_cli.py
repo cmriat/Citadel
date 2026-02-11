@@ -99,8 +99,8 @@ class ProgressTracker:
 
 
 def download(
-    bos_path: str = "srgdata/robot/raw_data/upload_test/0203_qz2_enhanced_pants_online_data/quad_arm_task/",
-    local_path: str = "/pfs/pfs-uaDOJM/home/maozan/code/data/0203_qz2_pants/raw/",
+    bos_path: str = "srgdata/robot/raw_data/upload_test/0210_qz2_enhanced_pants_online_data/quad_arm_task/",
+    local_path: str = "/pfs/pfs-uaDOJM/home/maozan/code/data/fold_laundry_v02/0210_qz2/raw",
     concurrency: Optional[int] = None,
     mc_path: str = "mc"
 ):
