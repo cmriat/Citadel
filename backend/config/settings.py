@@ -125,6 +125,31 @@ class Settings:
         """SQLite 数据库文件路径"""
         return _get_env("DB_PATH", "backend/data/tasks.db")
 
+    @property
+    def POSTGRES_HOST(self) -> str:
+        """Postgres host（用于 QC 同步/存在性校验）"""
+        return _get_env("POSTGRES_HOST", "172.16.0.24")
+
+    @property
+    def POSTGRES_PORT(self) -> int:
+        """Postgres port"""
+        return _get_env_int("POSTGRES_PORT", 5432)
+
+    @property
+    def POSTGRES_DB(self) -> str:
+        """Postgres database name"""
+        return _get_env("POSTGRES_DB", "data_manage")
+
+    @property
+    def POSTGRES_USER(self) -> str:
+        """Postgres username"""
+        return _get_env("POSTGRES_USER", "")
+
+    @property
+    def POSTGRES_PASSWORD(self) -> str:
+        """Postgres password"""
+        return _get_env("POSTGRES_PASSWORD", "")
+
     # =========================================================================
     # 业务默认值 - 并发和性能
     # =========================================================================
@@ -315,6 +340,10 @@ class Settings:
             "MC_PATH": self.MC_PATH,
             # 数据库
             "DB_PATH": self.DB_PATH,
+            "POSTGRES_HOST": self.POSTGRES_HOST,
+            "POSTGRES_PORT": self.POSTGRES_PORT,
+            "POSTGRES_DB": self.POSTGRES_DB,
+            "POSTGRES_USER": self.POSTGRES_USER,
             # 业务默认值
             "DEFAULT_CONCURRENCY": self.DEFAULT_CONCURRENCY,
             "DEFAULT_PARALLEL_JOBS": self.DEFAULT_PARALLEL_JOBS,

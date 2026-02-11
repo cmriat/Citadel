@@ -222,22 +222,47 @@ export interface Episode {
   thumbnails: string[]  // 4 帧 base64 缩略图
 }
 
-// Scan episodes with thumbnails for upload selection
-export const scanEpisodes = async (localDir: string): Promise<Episode[]> => {
+export interface ScanEpisodesResult {
+  base_dir: string
+  episodes: Episode[]
+}
+
+const _trimTrailingSlashes = (s: string): string => s.replace(/\/+$/, '')
+
+// Scan episodes with thumbnails for QC / merge selection.
+// Compatibility: prefer <localDir>/lerobot, fallback to <localDir>.
+export const scanEpisodes = async (localDir: string): Promise<ScanEpisodesResult> => {
   try {
-    const lerobotDir = `${localDir}/lerobot`
-    console.log('[scanEpisodes] localDir:', localDir)
-    console.log('[scanEpisodes] lerobotDir:', lerobotDir)
-    // 使用更长的超时时间（120秒），因为生成缩略图可能较慢
-    const episodes: Episode[] = await api.get('/upload/scan-episodes', {
-      params: { base_dir: lerobotDir },
-      timeout: 120000  // 2 分钟超时
-    })
-    console.log('[scanEpisodes] episodes count:', episodes?.length, 'type:', typeof episodes)
-    return episodes
+    const local = _trimTrailingSlashes(localDir)
+    const lerobotDir = local.endsWith('/lerobot') ? local : `${local}/lerobot`
+
+    const candidates = local.endsWith('/lerobot')
+      ? [local, local.slice(0, -'/lerobot'.length)]
+      : [lerobotDir, local]
+
+    console.log('[scanEpisodes] localDir:', local)
+    console.log('[scanEpisodes] candidates:', candidates)
+
+    for (const baseDir of candidates) {
+      // 使用更长的超时时间（120秒），因为生成缩略图可能较慢
+      const episodes: Episode[] = await api.get('/upload/scan-episodes', {
+        params: { base_dir: baseDir },
+        timeout: 120000  // 2 分钟超时
+      })
+      const list = Array.isArray(episodes) ? episodes : []
+      console.log('[scanEpisodes] baseDir:', baseDir, 'episodes:', list.length)
+      if (list.length > 0) {
+        return { base_dir: baseDir, episodes: list }
+      }
+    }
+
+    // 两次都为空时，默认回到首选候选目录。
+    return { base_dir: candidates[0] || local, episodes: [] }
   } catch (e) {
     console.error('[Pipeline] Failed to scan episodes:', e)
-    return []
+    const local = _trimTrailingSlashes(localDir)
+    const lerobotDir = local.endsWith('/lerobot') ? local : `${local}/lerobot`
+    return { base_dir: lerobotDir, episodes: [] }
   }
 }
 
@@ -329,6 +354,61 @@ export const updateQCEpisode = async (
 
 export const loadQCResult = async (baseDir: string): Promise<QCResultResponse> => {
   return api.get('/upload/load-qc-result', { params: { base_dir: baseDir } })
+}
+
+export type QCSyncMode = 'none' | 'validity' | 'manual'
+
+export interface SyncQCToDbResponse {
+  success: boolean
+  dry_run: boolean
+  mode: QCSyncMode
+  statement_count: number
+  episode_count?: number
+  episode_update_count?: number
+  updated_count?: number
+  statements?: { query: string; params?: any; description?: string }[]
+  exists_check?: {
+    checked: boolean
+    checked_count: number
+    missing_count: number
+    missing_examples?: { episode_name: string; generated_from?: string; data_format?: string; id: string }[]
+    message?: string
+    column?: string
+    non_null_count?: number
+    non_null_episode_count?: number
+    non_null_examples?: {
+      episode_name?: string
+      generated_from?: string
+      data_format?: string
+      id: string
+      value?: any
+    }[]
+  }
+}
+
+export const syncQCToDb = async (
+  baseDir: string,
+  result: QCResult,
+  mode: QCSyncMode,
+  opts?: {
+    dry_run?: boolean
+    check_exists?: boolean
+    device_id?: string
+    collect_date?: string
+    task_name?: string
+  }
+): Promise<SyncQCToDbResponse> => {
+  return api.post('/upload/sync-qc-to-db', {
+    base_dir: baseDir,
+    passed: result.passed,
+    failed: result.failed,
+    mode,
+    dry_run: opts?.dry_run ?? true,
+    check_exists: opts?.check_exists ?? false,
+    device_id: opts?.device_id,
+    collect_date: opts?.collect_date,
+    task_name: opts?.task_name,
+  })
 }
 
 // ============ Merge API ============

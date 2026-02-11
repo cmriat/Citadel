@@ -4,6 +4,7 @@
 
 import asyncio
 import json
+import logging
 from email.utils import parsedate
 from pathlib import Path
 from datetime import datetime
@@ -17,7 +18,15 @@ from backend.models.task import CreateUploadTaskRequest, TaskResponse
 from backend.services.upload_service import get_upload_service
 from backend.routers.tasks import task_to_response
 
+from backend.services.postgre_sql_manager import PostgreSqlManager
+
 router = APIRouter(prefix="/api/upload", tags=["upload"])
+
+logger = logging.getLogger(__name__)
+# Uvicorn 默认 logging config 只配置了 uvicorn.* logger。
+# 为了让我们自己的 INFO 日志在 dev/start 启动方式下也能直接出现在控制台，
+# 对关键诊断日志使用 uvicorn.error 这个已配置 handler 的 logger。
+_uvicorn_logger = logging.getLogger("uvicorn.error")
 
 
 _NOT_MODIFIED_HEADERS = {
@@ -319,7 +328,10 @@ def _get_qc_file_and_dataset_key(base_dir: str) -> tuple[Path, str]:
     """由 base_dir(lerobot 目录) 推导 qc_result.json 路径与房间 key。"""
 
     base_path = _resolve_path(Path(base_dir).expanduser())
-    dataset_root = base_path.parent
+    # base_dir 可能是：
+    # - dataset_root/lerobot（历史约定）
+    # - dataset_root（episode 平铺在根目录时）
+    dataset_root = PostgreSqlManager.resolve_dataset_root_from_base_dir(base_path)
     qc_file = dataset_root / QC_RESULT_FILENAME
     return qc_file, str(dataset_root)
 
@@ -565,3 +577,323 @@ async def load_qc_result(base_dir: str) -> QCResultResponse:
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"加载 QC 结果失败: {str(e)}")
+
+
+# ============ QC Result -> Postgres Sync (dwd_episode) ============
+
+
+class QCSyncToDbRequest(BaseModel):
+    """将 QC 结果同步到 Postgres dwd_episode。
+
+    注意：为了避免误写库，默认 dry_run=True，仅返回将要执行的 SQL。
+
+    字段语义（与数仓约定对齐）：
+    - validity: is_valid=1 表示通过，0 表示不通过
+    - manual: quality_problem_manual=1 表示有问题（不通过），0 表示无问题（通过）
+    """
+
+    base_dir: str
+    passed: List[str] = []
+    failed: List[str] = []
+
+    # a) none: 不写库
+    # b) validity: 写入 is_valid
+    # c) manual: 写入 quality_problem_manual
+    mode: Literal["none", "validity", "manual"]
+    dry_run: bool = True
+
+    # 可选：在生成 UPDATE 语句前先校验目标记录是否存在。
+    # - 若缺失，将跳过这些记录，并在响应中返回缺失列表（前端可提示原因）。
+    check_exists: bool = False
+
+    # 若路径不符合规范，可手动覆盖这 3 个字段
+    device_id: Optional[str] = None
+    collect_date: Optional[str] = None
+    task_name: Optional[str] = None
+
+
+@router.post("/sync-qc-to-db")
+async def sync_qc_to_db(request: QCSyncToDbRequest) -> Dict[str, Any]:
+    """QC 确认后可选同步质检结果到 Postgres(dwd_episode)。
+
+    - 通过路径+相关信息定位 dwd_episode.id（默认按 UUID v5 规则计算，不依赖 DB 查询）
+    - 按主键 id 更新字段：
+      - validity: is_valid=1/0
+      - manual: quality_problem_manual=1(有问题)/0(无问题)
+    """
+
+    if request.mode == "none":
+        return {
+            "success": True,
+            "dry_run": True,
+            "mode": request.mode,
+            "statements": [],
+            "statement_count": 0,
+            "episode_count": 0,
+            "episode_update_count": 0,
+        }
+
+    # 同一条 episode 在数仓里可能同时存在两条记录：
+    # - generated_from=format_conversion + data_format=lerobot（LeRobot 转换结果）
+    # - generated_from=collect + data_format=h5（原始采集 H5）
+    # 因此同步 QC 时默认同时更新两者。
+    _target_sources = (
+        ("format_conversion", "lerobot"),
+        ("collect", "h5"),
+    )
+
+    def _compute_episode_id_items() -> List[Dict[str, str]]:
+        """计算需校验存在性的 dwd_episode.id 列表（包含多种 generated_from）。"""
+
+        dataset_root = PostgreSqlManager.resolve_dataset_root_from_base_dir(
+            request.base_dir
+        )
+
+        device_id = request.device_id
+        collect_date = request.collect_date
+        task_name = request.task_name
+        if device_id is None or collect_date is None or task_name is None:
+            parsed = PostgreSqlManager.parse_pfs_lerobot_dataset_root(dataset_root)
+            device_id = device_id or parsed["device_id"]
+            collect_date = collect_date or parsed["collect_date"]
+            task_name = task_name or parsed["task_name"]
+
+        assert device_id is not None
+        assert collect_date is not None
+        assert task_name is not None
+
+        passed_set = set(request.passed or [])
+        failed_set = set(request.failed or [])
+        passed_set -= failed_set
+
+        episode_names = sorted(passed_set | failed_set)
+        items: List[Dict[str, str]] = []
+        for ep_name in episode_names:
+            ep_idx = PostgreSqlManager.parse_episode_index(ep_name)
+            for generated_from, data_format in _target_sources:
+                episode_id = PostgreSqlManager.compute_dwd_episode_id(
+                    device_id=device_id,
+                    collect_date=collect_date,
+                    task_name=task_name,
+                    episode_index=ep_idx,
+                    generated_from=generated_from,
+                    data_format=data_format,
+                )
+                items.append(
+                    {
+                        "episode_name": ep_name,
+                        "generated_from": generated_from,
+                        "data_format": data_format,
+                        "id": episode_id,
+                    }
+                )
+        return items
+
+    def _check_dwd_episode_exists(
+        episode_id_items: List[Dict[str, str]],
+        qc_col: str,
+    ) -> tuple[set[str], List[Dict[str, str]], Dict[str, Any]]:
+        ids = sorted({it["id"] for it in episode_id_items})
+        if not ids:
+            return set(), [], {}
+
+        try:
+            db = PostgreSqlManager()
+        except Exception as e:
+            # 连接/驱动缺失等问题：返回可读原因。
+            raise HTTPException(status_code=500, detail=f"数据库连接失败: {str(e)}")
+
+        try:
+            # 批量查询存在的 id。
+            # 使用 uuid[] 显式 cast，避免 array 类型不明确导致的适配问题。
+            db.cursor.execute(
+                f"SELECT id::text, {qc_col} FROM dwd_episode WHERE id = ANY(%s::uuid[]);",
+                (ids,),
+            )
+            rows = db.cursor.fetchall()
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"数据库查询失败: {str(e)}")
+        finally:
+            try:
+                db.close()
+            except Exception:
+                pass
+
+        existing_ids = {str(r[0]) for r in rows}
+        non_null_values = {
+            str(r[0]): r[1] for r in rows if len(r) >= 2 and r[1] is not None
+        }
+        missing = [it for it in episode_id_items if it["id"] not in existing_ids]
+        return existing_ids, missing, non_null_values
+
+    try:
+        exists_check = None
+        existing_ids: Optional[set[str]] = None
+        passed_set = set(request.passed or [])
+        failed_set = set(request.failed or [])
+        passed_set -= failed_set
+        episode_names = sorted(passed_set | failed_set)
+        episode_count = len(episode_names)
+        episode_update_count = episode_count
+        if request.check_exists:
+            qc_col = (
+                "is_valid" if request.mode == "validity" else "quality_problem_manual"
+            )
+            episode_id_items = _compute_episode_id_items()
+            existing_ids, missing, non_null_values = _check_dwd_episode_exists(
+                episode_id_items, qc_col
+            )
+
+            # 以 episode 维度统计：只要任一数据源存在，就认为该 episode 会被更新。
+            episodes_to_update = {
+                it["episode_name"]
+                for it in episode_id_items
+                if it["id"] in existing_ids
+            }
+            episode_update_count = len(episodes_to_update)
+
+            # 覆盖提示：若目标字段已有值（非 NULL），前端二次确认时提示可能覆盖。
+            item_by_id = {it["id"]: it for it in episode_id_items}
+            non_null_ids = set(non_null_values.keys())
+            non_null_episode_count = len(
+                {item_by_id[i]["episode_name"] for i in non_null_ids if i in item_by_id}
+            )
+            non_null_examples = []
+            for i in list(non_null_ids)[:10]:
+                it = item_by_id.get(i)
+                if not it:
+                    continue
+                non_null_examples.append(
+                    {
+                        "episode_name": it.get("episode_name"),
+                        "generated_from": it.get("generated_from"),
+                        "data_format": it.get("data_format"),
+                        "id": i,
+                        "value": non_null_values.get(i),
+                    }
+                )
+
+            missing_by_source: Dict[str, int] = {
+                f"{g}/{f}": 0 for g, f in _target_sources
+            }
+            for m in missing:
+                key = f"{m.get('generated_from')}/{m.get('data_format')}"
+                missing_by_source[key] = missing_by_source.get(key, 0) + 1
+
+            examples = ", ".join(
+                f"{m['episode_name']}[{m['generated_from']}/{m['data_format']}]({m['id']})"
+                for m in missing[:10]
+            )
+            hint = "可检查 device_id/collect_date/task_name 是否与数仓一致，必要时在请求里显式传入覆盖。"
+            missing_breakdown = ", ".join(
+                f"{k}={missing_by_source.get(k, 0)}" for k in missing_by_source.keys()
+            )
+            message = (
+                f"数据库中未找到对应 dwd_episode 记录: missing_count={len(missing)} ({missing_breakdown}). "
+                f"examples={examples}. {hint}"
+                if missing
+                else ""
+            )
+
+            exists_check = {
+                "checked": True,
+                "checked_count": len(episode_id_items),
+                "missing_count": len(missing),
+                "missing_examples": missing[:10],
+                "message": message,
+                "column": qc_col,
+                "non_null_count": len(non_null_values),
+                "non_null_episode_count": non_null_episode_count,
+                "non_null_examples": non_null_examples,
+            }
+
+        stmts = []
+        for generated_from, data_format in _target_sources:
+            stmts.extend(
+                PostgreSqlManager.build_qc_sync_statements(
+                    base_dir=request.base_dir,
+                    passed_episodes=list(request.passed or []),
+                    failed_episodes=list(request.failed or []),
+                    qc_type=request.mode,  # "validity" | "manual"
+                    device_id=request.device_id,
+                    collect_date=request.collect_date,
+                    task_name=request.task_name,
+                    generated_from=generated_from,
+                    data_format=data_format,
+                    prefer_compute_id=True,
+                )
+            )
+
+        if request.check_exists and existing_ids is not None:
+            # 跳过缺失记录：仅保留数据库中存在的目标 id。
+            filtered = []
+            for s in stmts:
+                params = s.params
+                if (
+                    isinstance(params, tuple)
+                    and len(params) >= 2
+                    and params[1] in existing_ids
+                ):
+                    filtered.append(s)
+            stmts = filtered
+    except ValueError as e:
+        # 输入/路径解析类错误：给前端可读原因（400），避免默认 generic 500。
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"同步到数据库失败: {str(e)}")
+
+    if request.dry_run:
+        _uvicorn_logger.info(
+            "[sync-qc-to-db][dry-run] mode=%s base_dir=%s statement_count=%d",
+            request.mode,
+            request.base_dir,
+            len(stmts),
+        )
+        for i, s in enumerate(stmts[:5], start=1):
+            _uvicorn_logger.info(
+                "[sync-qc-to-db][dry-run] #%d %s query=%s params=%s",
+                i,
+                s.description or "",
+                s.query,
+                s.params,
+            )
+        return {
+            "success": True,
+            "dry_run": True,
+            "mode": request.mode,
+            "statement_count": len(stmts),
+            "episode_count": episode_count,
+            "episode_update_count": episode_update_count,
+            "statements": [
+                {"query": s.query, "params": s.params, "description": s.description}
+                for s in stmts
+            ],
+            "exists_check": exists_check,
+        }
+
+    try:
+        db = PostgreSqlManager()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"数据库连接失败: {str(e)}")
+
+    try:
+        updated_count = 0
+        for s in stmts:
+            updated_count += int(db.execute(s.query, s.params) or 0)
+        return {
+            "success": True,
+            "dry_run": False,
+            "mode": request.mode,
+            "statement_count": len(stmts),
+            "updated_count": updated_count,
+            "episode_count": episode_count,
+            "episode_update_count": episode_update_count,
+            "exists_check": exists_check,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"数据库写入失败: {str(e)}")
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass

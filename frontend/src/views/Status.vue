@@ -5,6 +5,7 @@ import { getHealth, getStats } from '@/api/tasks'
 import type { HealthCheck, Stats } from '@/api/index'
 import { useThemeStore } from '@/stores/theme'
 import StatCard from '@/components/StatCard.vue'
+import { formatPercent } from '@/utils/format'
 
 const themeStore = useThemeStore()
 const health = ref<HealthCheck | null>(null)
@@ -30,6 +31,10 @@ const fetchData = async () => {
 onMounted(() => {
   fetchData()
 })
+
+const formatProgressText = (percentage: number): string => {
+  return `${formatPercent(percentage)}%`
+}
 </script>
 
 <template>
@@ -132,6 +137,7 @@ onMounted(() => {
               :percentage="stats.tasks.total ? (stats.tasks.completed / stats.tasks.total * 100) : 0"
               status="success"
               :stroke-width="12"
+              :format="formatProgressText"
             />
           </div>
           <div class="bar-item">
@@ -142,6 +148,7 @@ onMounted(() => {
             <el-progress
               :percentage="stats.tasks.total ? (stats.tasks.running / stats.tasks.total * 100) : 0"
               :stroke-width="12"
+              :format="formatProgressText"
             />
           </div>
           <div class="bar-item">
@@ -153,6 +160,7 @@ onMounted(() => {
               :percentage="stats.tasks.total ? (stats.tasks.pending / stats.tasks.total * 100) : 0"
               status="warning"
               :stroke-width="12"
+              :format="formatProgressText"
             />
           </div>
           <div class="bar-item">
@@ -164,6 +172,7 @@ onMounted(() => {
               :percentage="stats.tasks.total ? (stats.tasks.failed / stats.tasks.total * 100) : 0"
               status="exception"
               :stroke-width="12"
+              :format="formatProgressText"
             />
           </div>
         </div>

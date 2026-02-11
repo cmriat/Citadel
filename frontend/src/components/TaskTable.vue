@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import type { Task } from '@/api/index'
 import { Icon } from '@iconify/vue'
+import { formatPercent } from '@/utils/format'
 
 const props = defineProps<{
   tasks: Task[]
@@ -39,6 +40,10 @@ const formatSpeed = (bytesPerSec: number): string => {
   if (bytesPerSec < 1024 * 1024 * 1024) return (bytesPerSec / 1024 / 1024).toFixed(1) + ' MB/s'
   return (bytesPerSec / 1024 / 1024 / 1024).toFixed(2) + ' GB/s'
 }
+
+const formatProgressText = (percentage: number): string => {
+  return `${formatPercent(percentage)}%`
+}
 </script>
 
 <template>
@@ -63,6 +68,7 @@ const formatSpeed = (bytesPerSec: number): string => {
           :percentage="row.progress?.percent || 0"
           :status="row.status === 'completed' ? 'success' : row.status === 'failed' ? 'exception' : undefined"
           :stroke-width="8"
+          :format="formatProgressText"
         />
       </template>
     </el-table-column>

@@ -5,7 +5,8 @@
  * 用于在 Merge 前对 episode 进行质量检查，支持视频播放和标记通过/不通过
  */
 
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick, shallowRef } from 'vue'
+import type { ComponentPublicInstance } from 'vue'
 import { Icon } from '@iconify/vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
@@ -60,11 +61,99 @@ const cameras = [
 ]
 const currentCamera = ref('cam_env')
 
+// Playback speed (per camera)
+const RATE_OPTIONS = [0.5, 1.0, 1.5, 2.0, 3.0] as const
+type PlaybackRate = (typeof RATE_OPTIONS)[number]
+const DEFAULT_RATE: PlaybackRate = 1.0
+
+const rateByCamera = ref<Record<string, PlaybackRate>>({
+  cam_env: DEFAULT_RATE,
+  cam_left_wrist: DEFAULT_RATE,
+  cam_right_wrist: DEFAULT_RATE,
+})
+
+const isAllowedRate = (n: number): n is PlaybackRate => {
+  return RATE_OPTIONS.some(v => v === n)
+}
+
+const formatRate = (rate: number): string => {
+  return `${rate.toFixed(1)}x`
+}
+
+// Keep stable references to the three <video> elements rendered in v-for.
+const videoElByCamera = shallowRef(new Map<string, HTMLVideoElement>())
+
+const cellElByCamera = shallowRef(new Map<string, HTMLElement>())
+
+type TemplateDomRef = Element | ComponentPublicInstance | null
+
+const setVideoRef = (cameraId: string) => (refEl: TemplateDomRef) => {
+  const el = refEl instanceof HTMLVideoElement ? refEl : null
+  if (el) videoElByCamera.value.set(cameraId, el)
+  else videoElByCamera.value.delete(cameraId)
+}
+
+const setCellRef = (cameraId: string) => (refEl: TemplateDomRef) => {
+  const el = refEl instanceof HTMLElement ? refEl : null
+  if (el) cellElByCamera.value.set(cameraId, el)
+  else cellElByCamera.value.delete(cameraId)
+}
+
+const toggleFullscreen = async (cameraId: string) => {
+  const el = cellElByCamera.value.get(cameraId)
+  if (!el) return
+
+  // In fullscreen, browser only renders the fullscreen element subtree.
+  // We fullscreen the whole cell so the speed control remains accessible.
+  if (document.fullscreenElement === el) {
+    await document.exitFullscreen()
+    return
+  }
+  await el.requestFullscreen()
+}
+
+const applyPlaybackRate = async (cameraId?: string) => {
+  await nextTick()
+
+  const applyOne = (id: string) => {
+    const el = videoElByCamera.value.get(id)
+    if (!el) return
+    const rate = rateByCamera.value[id] ?? DEFAULT_RATE
+
+    // Both are set so that reload/source changes are less likely to reset to 1.0.
+    el.defaultPlaybackRate = rate
+    el.playbackRate = rate
+  }
+
+  if (cameraId) {
+    applyOne(cameraId)
+  } else {
+    cameras.forEach(cam => applyOne(cam.id))
+  }
+}
+
+const setPlaybackRate = (cameraId: string, command: unknown) => {
+  const n = typeof command === 'number' ? command : Number(command)
+  const rate = isAllowedRate(n) ? n : DEFAULT_RATE
+  rateByCamera.value[cameraId] = rate
+  void applyPlaybackRate(cameraId)
+}
+
+const resetPlaybackRates = () => {
+  cameras.forEach(cam => {
+    rateByCamera.value[cam.id] = DEFAULT_RATE
+  })
+  void applyPlaybackRate()
+}
+
 const resetQCState = () => {
   qcStatus.value = {}
   currentEpisode.value = null
   currentCamera.value = 'cam_env'
   hasShownResumeHint.value = false
+
+  // Also reset playback speeds for a clean state.
+  resetPlaybackRates()
 }
 
 const activeBaseDir = ref<string | null>(null)
@@ -78,6 +167,14 @@ watch(visible, (val) => {
 
   activeBaseDir.value = props.baseDir
   resetQCState()
+})
+
+// Requirement: switching episode resets all speeds back to 1.0x.
+watch(currentEpisode, (newEp, oldEp) => {
+  if (!newEp) return
+  if (newEp !== oldEp) {
+    resetPlaybackRates()
+  }
 })
 
 // 初始化 QC 状态（episodes / initialResult 可能异步到达）
@@ -371,17 +468,18 @@ onUnmounted(() => {
         </div>
 
         <div class="episodes" v-loading="loading">
-          <div
-            v-for="ep in episodes"
-            :key="ep.name"
-            class="episode-item"
-            :class="{
-              active: currentEpisode === ep.name,
-              passed: qcStatus[ep.name] === 'passed',
-              failed: qcStatus[ep.name] === 'failed'
-            }"
-            @click="playVideo(ep.name)"
-          >
+            <div
+              v-for="ep in episodes"
+              :key="ep.name"
+              class="episode-item"
+              :data-testid="`qc-episode-${ep.name}`"
+              :class="{
+                active: currentEpisode === ep.name,
+                passed: qcStatus[ep.name] === 'passed',
+                failed: qcStatus[ep.name] === 'failed'
+              }"
+              @click="playVideo(ep.name)"
+            >
             <div class="ep-thumbnail">
               <img
                 v-if="ep.thumbnails?.[0]"
@@ -435,14 +533,54 @@ onUnmounted(() => {
 
           <!-- 三个相机并排显示 -->
           <div class="video-grid">
-            <div v-for="cam in cameras" :key="cam.id" class="video-cell">
+            <div v-for="cam in cameras" :key="cam.id" class="video-cell" :ref="setCellRef(cam.id)">
               <div class="camera-label">
-                <Icon :icon="cam.icon" /> {{ cam.label }}
+                <div class="camera-label-left">
+                  <Icon :icon="cam.icon" /> {{ cam.label }}
+                </div>
+                <div class="camera-label-actions">
+                  <el-dropdown
+                    trigger="click"
+                    :teleported="false"
+                    @command="(cmd: number) => setPlaybackRate(cam.id, cmd)"
+                  >
+                  <el-button
+                    :data-testid="`qc-rate-${cam.id}`"
+                    size="small"
+                    text
+                    class="rate-trigger"
+                  >
+                    {{ formatRate(rateByCamera[cam.id] ?? 1.0) }}
+                    <Icon icon="mdi:chevron-down" />
+                  </el-button>
+                  <template #dropdown>
+                    <el-dropdown-menu>
+                      <el-dropdown-item v-for="r in RATE_OPTIONS" :key="r" :command="r">
+                        {{ formatRate(r) }}
+                      </el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                  </el-dropdown>
+
+                  <el-button
+                    size="small"
+                    text
+                    class="fullscreen-trigger"
+                    :title="'全屏'"
+                    @click="() => toggleFullscreen(cam.id)"
+                  >
+                    <Icon icon="mdi:fullscreen" />
+                  </el-button>
+                </div>
               </div>
               <video
                 :key="`${currentEpisode}-${cam.id}`"
                 :src="getVideoUrl(currentEpisode, cam.id)"
+                :data-testid="`qc-video-${cam.id}`"
+                :ref="setVideoRef(cam.id)"
+                @loadedmetadata="() => applyPlaybackRate(cam.id)"
                 controls
+                controlslist="nofullscreen"
                 autoplay
                 muted
                 class="video-player-small"
@@ -707,13 +845,35 @@ onUnmounted(() => {
 .camera-label {
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
   gap: 6px;
   padding: 6px 8px;
   background: var(--el-fill-color);
   font-size: 12px;
   font-weight: 500;
   color: var(--el-text-color-regular);
+}
+
+.camera-label-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.camera-label-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rate-trigger {
+  padding: 0 4px;
+  font-weight: 600;
+}
+
+.fullscreen-trigger {
+  padding: 0 4px;
 }
 
 .video-player-small {

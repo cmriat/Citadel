@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import type { Task } from '@/api/index'
 import { Icon } from '@iconify/vue'
 import ProgressDisplay from './ProgressDisplay.vue'
+import { formatPercent } from '@/utils/format'
 
 const props = defineProps<{
   task: Task | null
@@ -45,6 +46,10 @@ const formatDuration = (start: string | null, end: string | null) => {
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`
   return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`
 }
+
+const formatProgressText = (percentage: number): string => {
+  return `${formatPercent(percentage)}%`
+}
 </script>
 
 <template>
@@ -77,7 +82,7 @@ const formatDuration = (start: string | null, end: string | null) => {
           </div>
           <div class="detail-item">
             <span class="label">Progress</span>
-            <span class="value">{{ task.progress?.percent || 0 }}%</span>
+            <span class="value">{{ formatProgressText(task.progress?.percent || 0) }}</span>
           </div>
         </div>
       </div>

@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { Icon } from '@iconify/vue'
 import { useTaskStore } from '@/stores/tasks'
 import { useThemeStore } from '@/stores/theme'
+import { formatPercent } from '@/utils/format'
 
 const taskStore = useTaskStore()
 const themeStore = useThemeStore()
@@ -41,6 +42,10 @@ const progress = computed(() => {
   return runningTask.value?.progress?.percent || 0
 })
 
+const formattedProgress = computed(() => {
+  return `${formatPercent(progress.value)}%`
+})
+
 // 简短消息
 const shortMessage = computed(() => {
   const msg = runningTask.value?.progress?.message || ''
@@ -64,7 +69,7 @@ const shortMessage = computed(() => {
           :show-text="false"
           class="progress-bar"
         />
-        <span class="task-percent">{{ progress }}%</span>
+        <span class="task-percent">{{ formattedProgress }}</span>
         <span class="task-msg">{{ shortMessage }}</span>
       </div>
       <div class="no-running" v-else>

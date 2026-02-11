@@ -7,6 +7,7 @@
         :status="progressStatus"
         :stroke-width="strokeWidth"
         :show-text="showText"
+        :format="formatProgressText"
       />
     </div>
 
@@ -56,6 +57,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { Icon } from '@iconify/vue'
+import { formatPercent } from '@/utils/format'
 
 interface TaskProgress {
   percent: number
@@ -136,6 +138,10 @@ const truncateFileName = (fileName: string, maxLength: number = 50): string => {
   const ext = fileName.split('.').pop() || ''
   const name = fileName.slice(0, maxLength - ext.length - 3)
   return `${name}...${ext}`
+}
+
+const formatProgressText = (percentage: number): string => {
+  return `${formatPercent(percentage)}%`
 }
 </script>
 

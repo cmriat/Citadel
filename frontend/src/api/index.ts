@@ -48,14 +48,57 @@ const api = axios.create({
   }
 }) as ApiInstance
 
+type FastApiValidationErrorItem = {
+  loc?: unknown
+  msg?: unknown
+  type?: unknown
+}
+
+const _formatFastApiDetail = (detail: unknown): string | undefined => {
+  if (typeof detail === 'string' && detail.trim()) return detail
+
+  // FastAPI validation error: detail is an array of {loc,msg,type,...}
+  if (Array.isArray(detail)) {
+    const items = detail as FastApiValidationErrorItem[]
+    const lines = items
+      .map((it) => {
+        const loc = Array.isArray(it?.loc) ? it.loc.map(String).join('.') : ''
+        const msg = typeof it?.msg === 'string' ? it.msg : (it?.msg != null ? String(it.msg) : '')
+        if (loc && msg) return `${loc}: ${msg}`
+        if (msg) return msg
+        return ''
+      })
+      .filter(Boolean)
+
+    if (lines.length > 0) return lines.join('\n')
+  }
+
+  if (detail && typeof detail === 'object') {
+    try {
+      return JSON.stringify(detail)
+    } catch {
+      return String(detail)
+    }
+  }
+
+  return undefined
+}
+
 // Response interceptor
 api.interceptors.response.use(
   (response: AxiosResponse) => response.data,
   (error) => {
     const status = error.response?.status
     const data = error.response?.data
+
+    // Prefer backend-provided message/detail when possible.
     const detail = data?.detail
-    const message = detail || error.message || 'Request failed'
+    const formattedDetail = _formatFastApiDetail(detail)
+    const backendMessage =
+      (typeof data?.message === 'string' && data.message) ||
+      formattedDetail ||
+      (typeof detail === 'string' ? detail : undefined)
+    const message = backendMessage || error.message || 'Request failed'
 
     console.error('API Error:', message)
     return Promise.reject(new ApiError(message, { status, detail, data }))

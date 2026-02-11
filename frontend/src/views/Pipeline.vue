@@ -9,9 +9,9 @@ import {
   runStep, derivePaths, hasPathTemplate, resolvePath,
   checkDownloadReady, checkConvertReady, checkMergedReady,
   scanEpisodes, runMerge, getMergeProgress,
-  loadQCResult, uploadMerged, updateQCEpisode
+  loadQCResult, syncQCToDb, uploadMerged, updateQCEpisode
 } from '@/api/pipeline'
-import type { PipelineConfig, CheckResult, Episode, QCResult, MergeConfig, QCResultResponse } from '@/api/pipeline'
+import type { PipelineConfig, CheckResult, Episode, QCResult, MergeConfig, QCResultResponse, QCSyncMode } from '@/api/pipeline'
 import ValidatedInput from '@/components/ValidatedInput.vue'
 import TaskPreviewBar from '@/components/TaskPreviewBar.vue'
 import QCInspector from '@/components/QCInspector.vue'
@@ -73,7 +73,19 @@ const paths = computed(() => derivePaths(config))
 
 // 解析本地目录模板（用于 QC/merge 等需要实际路径的场景）
 const resolvedLocalDir = computed(() => resolvePath(config.local_dir))
-const currentLerobotDir = computed(() => `${resolvedLocalDir.value}/lerobot`)
+
+// QC base_dir：优先使用 <local_dir>/lerobot；若为空（episode 平铺在 <local_dir>）则回退到 <local_dir>。
+const preferredQCDir = computed(() => `${resolvedLocalDir.value}/lerobot`)
+const qcBaseDir = ref<string>(preferredQCDir.value)
+
+// local_dir 变化时重置为首选目录，后续打开 QC/merge 时再根据扫描结果修正。
+watch(
+  () => preferredQCDir.value,
+  (dir) => {
+    qcBaseDir.value = dir
+  },
+  { immediate: true }
+)
 
 // ============ QC + Merge State ============
 const showQCInspector = ref(false)
@@ -82,6 +94,109 @@ const qcLoading = ref(false)
 const qcResult = ref<QCResult | null>(null)
 const qcResultTimestamp = ref<string | null>(null)
 const mergeTaskId = ref<string | null>(null)
+
+// QC -> DB sync dialog
+const showQCSyncDialog = ref(false)
+const qcSyncDialogLoading = ref(false)
+const qcSyncPendingResult = ref<QCResult | null>(null)
+
+const resetQCSyncDialogState = () => {
+  qcSyncDialogLoading.value = false
+  qcSyncPendingResult.value = null
+}
+
+const openQCSyncDialog = (result: QCResult) => {
+  qcSyncPendingResult.value = result
+  showQCSyncDialog.value = true
+}
+
+const handleQCSyncDialogClosed = () => {
+  resetQCSyncDialogState()
+}
+
+const handleQCSyncSelect = async (mode: QCSyncMode) => {
+  if (mode === 'none') {
+    showQCSyncDialog.value = false
+    return
+  }
+
+  const result = qcSyncPendingResult.value
+  if (!result) {
+    showQCSyncDialog.value = false
+    return
+  }
+
+  const modeLabel = mode === 'validity' ? '有效性校验' : '人工质检'
+
+  // 1) 先 dry-run + 存在性校验，拿到“实际会更新的条目数”
+  qcSyncDialogLoading.value = true
+  let preview: Awaited<ReturnType<typeof syncQCToDb>>
+  try {
+    preview = await syncQCToDb(qcBaseDir.value, result, mode, { dry_run: true, check_exists: true })
+  } catch (e) {
+    ElMessage.warning(`同步到数据库失败: ${(e as Error).message}`)
+    return
+  } finally {
+    qcSyncDialogLoading.value = false
+  }
+
+  const toUpdate = preview.episode_update_count ?? preview.episode_count ?? 0
+  const missingCount = preview.exists_check?.missing_count || 0
+  const nonNullEpisodeCount = preview.exists_check?.non_null_episode_count || 0
+
+  if (toUpdate <= 0) {
+    if (missingCount > 0) {
+      ElMessage.warning(preview.exists_check?.message || `数据库缺失 ${missingCount} 条记录，已全部跳过`)
+    } else {
+      ElMessage.info('没有可更新的数据')
+    }
+    showQCSyncDialog.value = false
+    return
+  }
+
+  // 2) 二次确认：只有确实有可更新记录时才提示是否写库
+  const existsLine = nonNullEpisodeCount > 0
+    ? `\n\n注意：检测到 ${nonNullEpisodeCount} 个 episode 在数据库中已有该字段值（非 NULL），继续将覆盖更新。`
+    : ''
+
+  const confirmMessage = missingCount > 0
+    ? `将把本次 QC 结果保存为「${modeLabel}」并更新数据库。\n\n将更新 ${toUpdate} 个 episode（另有 ${missingCount} 条记录在数据库中不存在，已跳过）。${existsLine}\n\n确认继续？`
+    : `将把本次 QC 结果保存为「${modeLabel}」并更新数据库。\n\n将更新 ${toUpdate} 个 episode。${existsLine}\n\n确认继续？`
+
+  try {
+    await ElMessageBox.confirm(
+      confirmMessage,
+      '确认更新数据库',
+      {
+        confirmButtonText: '确认更新',
+        cancelButtonText: '取消',
+        type: 'warning',
+        customStyle: { whiteSpace: 'pre-line' },
+        distinguishCancelAndClose: true,
+        closeOnClickModal: false,
+      }
+    )
+  } catch {
+    // 用户取消/关闭：不写库
+    return
+  }
+
+  // 3) 真正写库
+  qcSyncDialogLoading.value = true
+  try {
+    const res = await syncQCToDb(qcBaseDir.value, result, mode, { dry_run: false, check_exists: true })
+    const updatedEpisodes = res.episode_update_count ?? toUpdate
+    ElMessage.success(`已更新数据库（${updatedEpisodes} 个 episode）`)
+    if (res.exists_check?.checked && (res.exists_check.missing_count || 0) > 0) {
+      ElMessage.warning(res.exists_check.message || `数据库缺失 ${res.exists_check.missing_count} 条记录，已跳过`)
+    }
+    showQCSyncDialog.value = false
+  } catch (e) {
+    ElMessage.warning(`更新数据库失败: ${(e as Error).message}`)
+  } finally {
+    qcSyncDialogLoading.value = false
+  }
+}
 
 const qcClientId = (() => {
   // 注意：不要用 sessionStorage 持久化 client_id。
@@ -108,7 +223,7 @@ let qcWsReconnectAttempts = 0
 let qcWsBaseDir: string | null = null
 
 // 当前已同步过 QC 结果的目录（用于避免重复 toast）
-const lastSyncedQCLerobotDir = ref<string | null>(null)
+const lastSyncedQCBaseDir = ref<string | null>(null)
 let qcResultSyncTimer: ReturnType<typeof setTimeout> | null = null
 
 // Merge episode selection
@@ -265,11 +380,12 @@ const openQCInspector = async () => {
     const resolvedDir = resolvedLocalDir.value
     console.log('[openQCInspector] resolvedDir:', resolvedDir)
 
-    await syncQCResultForCurrentDir({ showToast: false, force: true })
+    const scan = await scanEpisodes(resolvedDir)
+    qcBaseDir.value = scan.base_dir
+    qcEpisodes.value = scan.episodes
+    console.log('[openQCInspector] baseDir:', scan.base_dir, 'episodes:', scan.episodes?.length)
 
-    const result = await scanEpisodes(resolvedDir)
-    console.log('[openQCInspector] episodes count:', result?.length)
-    qcEpisodes.value = result
+    await syncQCResultForCurrentDir({ showToast: false, force: true })
   } catch (e) {
     ElMessage.error(`扫描 episode 失败: ${(e as Error).message}`)
     showQCInspector.value = false
@@ -307,8 +423,8 @@ const handleEpisodeUpdate = async (payload: { episodeName: string; status: 'pass
   updateLocalEpisodeStatus(payload.episodeName, payload.status)
 
   try {
-    const lerobotDir = currentLerobotDir.value
-    const res = await updateQCEpisode(lerobotDir, payload.episodeName, payload.status, {
+    const baseDir = qcBaseDir.value
+    const res = await updateQCEpisode(baseDir, payload.episodeName, payload.status, {
       client_id: qcClientId,
       base_timestamp: qcResultTimestamp.value ?? undefined,
       base_status: baseStatus,
@@ -338,8 +454,8 @@ const handleEpisodeUpdate = async (payload: { episodeName: string; status: 'pass
       }
 
       try {
-        const lerobotDir = currentLerobotDir.value
-        const res = await updateQCEpisode(lerobotDir, payload.episodeName, payload.status, {
+        const baseDir = qcBaseDir.value
+        const res = await updateQCEpisode(baseDir, payload.episodeName, payload.status, {
           client_id: qcClientId,
           base_timestamp: qcResultTimestamp.value ?? undefined,
           base_status: baseStatus,
@@ -367,12 +483,12 @@ const handleBulkEpisodeUpdate = async (
   // 先更新本地状态，保持 UI 及时反馈；失败/冲突时再强制同步。
   updates.forEach(u => updateLocalEpisodeStatus(u.episodeName, u.status))
 
-  const lerobotDir = currentLerobotDir.value
+  const baseDir = qcBaseDir.value
   let hasConflict = false
 
   for (const u of updates) {
     try {
-      const res = await updateQCEpisode(lerobotDir, u.episodeName, u.status, {
+      const res = await updateQCEpisode(baseDir, u.episodeName, u.status, {
         client_id: qcClientId,
         base_timestamp: qcResultTimestamp.value ?? undefined,
         base_status: u.baseStatus,
@@ -403,6 +519,10 @@ const handleQCConfirm = async (result: QCResult) => {
   // 多人协作下，避免用全量覆盖保存（容易覆盖他人刚写入的结果）。
   // 以每次 episode 更新为准，这里仅做一次强制同步，确保本地与全局一致。
   await syncQCResultForCurrentDir({ showToast: false, force: true })
+
+  // QC 确认时可选：不写库 / 写有效性校验 / 写人工质检。
+  // 为了避免误写库，后端默认 dry_run=true；这里只展示将要执行的 SQL 数量。
+  openQCSyncDialog(result)
 }
 
 // ============ Merge ============
@@ -419,10 +539,13 @@ const handleMerge = async () => {
   try {
     const resolvedDir = resolvePath(config.local_dir)
 
-    // 扫描所有 episode（scanEpisodes 内部会自动拼接 /lerobot）
+    // 扫描所有 episode：优先 <local_dir>/lerobot，为空则回退 <local_dir>
     console.log('[handleMerge] resolvedDir:', resolvedDir)
     console.log('[handleMerge] qcResult.passed:', qcResult.value.passed)
-    const episodes = await scanEpisodes(resolvedDir)
+    const scan = await scanEpisodes(resolvedDir)
+    qcBaseDir.value = scan.base_dir
+    const episodes = scan.episodes
+    console.log('[handleMerge] baseDir:', scan.base_dir)
     console.log('[handleMerge] scanned episodes:', episodes.map(ep => ep.name))
 
     // 只显示通过质检的 episode
@@ -454,11 +577,11 @@ const handleMergeConfirm = async (selectedEpisodes: string[]) => {
   loading.value = 'merge'
   try {
     const resolvedDir = resolvePath(config.local_dir)
-    const lerobotDir = `${resolvedDir}/lerobot`
+    const baseDir = qcBaseDir.value
 
     // 构建 merge 配置：将选中的 episode 合并
     const mergeConfig: MergeConfig = {
-      source_dirs: selectedEpisodes.map(ep => `${lerobotDir}/${ep}`),
+      source_dirs: selectedEpisodes.map(ep => `${baseDir}/${ep}`),
       output_dir: `${resolvedDir}/merged`,
       fps: config.fps,
       copy_images: false
@@ -491,22 +614,22 @@ const qcStats = computed(() => {
 const syncQCResultForCurrentDir = async (opts?: { showToast?: boolean; force?: boolean }) => {
   const showToast = opts?.showToast ?? false
   const force = opts?.force ?? false
-  const lerobotDir = currentLerobotDir.value
+  const baseDir = qcBaseDir.value
 
-  if (lastSyncedQCLerobotDir.value && lastSyncedQCLerobotDir.value !== lerobotDir) {
+  if (lastSyncedQCBaseDir.value && lastSyncedQCBaseDir.value !== baseDir) {
     qcResult.value = null
     qcResultTimestamp.value = null
-    lastSyncedQCLerobotDir.value = null
+    lastSyncedQCBaseDir.value = null
   }
 
   try {
     if (!force) {
-      if (lastSyncedQCLerobotDir.value === lerobotDir && qcResult.value) {
+      if (lastSyncedQCBaseDir.value === baseDir && qcResult.value) {
         return
       }
     }
 
-    const result = await loadQCResult(lerobotDir)
+    const result = await loadQCResult(baseDir)
 
     if (result.exists && (result.passed.length > 0 || result.failed.length > 0)) {
       qcResult.value = {
@@ -514,7 +637,7 @@ const syncQCResultForCurrentDir = async (opts?: { showToast?: boolean; force?: b
         failed: result.failed
       }
       qcResultTimestamp.value = result.timestamp ?? null
-      lastSyncedQCLerobotDir.value = lerobotDir
+      lastSyncedQCBaseDir.value = baseDir
       console.log('[syncQCResultForCurrentDir] Loaded QC result:', result)
 
       if (showToast) {
@@ -528,7 +651,7 @@ const syncQCResultForCurrentDir = async (opts?: { showToast?: boolean; force?: b
     } else {
       qcResult.value = null
       qcResultTimestamp.value = null
-      lastSyncedQCLerobotDir.value = null
+      lastSyncedQCBaseDir.value = null
     }
   } catch (e) {
     console.error('[syncQCResultForCurrentDir] Failed to load QC result:', e)
@@ -735,8 +858,8 @@ onMounted(async () => {
 
 // local_dir 变化时自动同步 qc_result.json（支持跨机器/重复打开同一数据集）
 watch(
-  () => currentLerobotDir.value,
-  (lerobotDir) => {
+  () => qcBaseDir.value,
+  (baseDir) => {
     if (qcResultSyncTimer) {
       clearTimeout(qcResultSyncTimer)
       qcResultSyncTimer = null
@@ -745,7 +868,7 @@ watch(
       syncQCResultForCurrentDir({ showToast: true })
     }, 300)
 
-    openQCWebSocket(lerobotDir)
+    openQCWebSocket(baseDir)
   },
   { immediate: true }
 )
@@ -818,24 +941,27 @@ onUnmounted(() => {
         <el-row :gutter="12">
           <el-col :span="12">
             <el-form-item label="Local Directory" class="compact-item">
-              <ValidatedInput v-model="config.local_dir" placeholder="./data/{date}" validation-type="local-path" prefix-icon="mdi:folder" />
-              <div class="derived-paths">
-                <span v-if="hasPathTemplate(config.local_dir)" class="template-hint">
-                  <Icon icon="mdi:calendar-clock" />
-                  运行时解析为:
-                </span>
-                <div class="path-list">
-                  <div class="path-item">
-                    <span class="path-label">H5原始文件:</span>
-                    <code>{{ paths.raw_dir }}</code>
-                  </div>
-                  <div class="path-item">
-                    <span class="path-label">LeRobot转换后:</span>
-                    <code>{{ paths.lerobot_dir }}</code>
-                  </div>
-                  <div class="path-item">
-                    <span class="path-label">合并后数据集:</span>
-                    <code>{{ paths.merged_dir }}</code>
+              <div data-testid="pipeline-local-dir-input" class="testid-input-wrap">
+                <ValidatedInput v-model="config.local_dir" placeholder="./data/{date}" validation-type="local-path" prefix-icon="mdi:folder" />
+
+                <div class="derived-paths">
+                  <span v-if="hasPathTemplate(config.local_dir)" class="template-hint">
+                    <Icon icon="mdi:calendar-clock" />
+                    运行时解析为:
+                  </span>
+                  <div class="path-list">
+                    <div class="path-item">
+                      <span class="path-label">H5原始文件:</span>
+                      <code>{{ paths.raw_dir }}</code>
+                    </div>
+                    <div class="path-item">
+                      <span class="path-label">LeRobot转换后:</span>
+                      <code>{{ paths.lerobot_dir }}</code>
+                    </div>
+                    <div class="path-item">
+                      <span class="path-label">合并后数据集:</span>
+                      <code>{{ paths.merged_dir }}</code>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -880,7 +1006,15 @@ onUnmounted(() => {
           <el-button type="success" :loading="loading === 'convert'" :disabled="loading !== null" @click="handleRunStep('convert')" class="step-btn">
             <Icon icon="mdi:swap-horizontal" /> Convert
           </el-button>
-          <el-button type="info" :loading="qcLoading" :disabled="loading !== null || qcLoading" @click="openQCInspector" class="step-btn">
+          <el-button
+            data-testid="pipeline-open-qc-button"
+            type="info"
+            :loading="qcLoading"
+            :disabled="loading !== null || qcLoading"
+            @click="openQCInspector"
+            class="step-btn"
+          >
+            <!-- E2E selector: open QC dialog -->
             <Icon icon="mdi:check-decagram" /> QC
             <el-badge v-if="qcStats" :value="qcStats.passed" type="success" class="qc-badge" />
           </el-button>
@@ -914,7 +1048,7 @@ onUnmounted(() => {
       <QCInspector
         v-model="showQCInspector"
         :episodes="qcEpisodes"
-        :base-dir="`${resolvePath(config.local_dir)}/lerobot`"
+        :base-dir="qcBaseDir"
         :loading="qcLoading"
         :initial-result="qcResult || undefined"
         @confirm="handleQCConfirm"
@@ -927,10 +1061,40 @@ onUnmounted(() => {
     <MergeEpisodeSelector
       v-model="showMergeSelector"
       :episodes="mergeEpisodes"
-      :base-dir="`${resolvePath(config.local_dir)}/lerobot`"
+      :base-dir="qcBaseDir"
       :loading="mergeSelectorLoading"
       @confirm="handleMergeConfirm"
     />
+
+    <el-dialog
+      v-model="showQCSyncDialog"
+      title="同步质检结果到数据库"
+      width="640px"
+      :close-on-click-modal="false"
+      @closed="handleQCSyncDialogClosed"
+    >
+      <template #footer>
+        <el-button :disabled="qcSyncDialogLoading" @click="showQCSyncDialog = false">
+          不保存
+        </el-button>
+        <el-button
+          type="warning"
+          :disabled="qcSyncDialogLoading"
+          :loading="qcSyncDialogLoading"
+          @click="handleQCSyncSelect('manual')"
+        >
+          保存为人工质检
+        </el-button>
+        <el-button
+          type="primary"
+          :disabled="qcSyncDialogLoading"
+          :loading="qcSyncDialogLoading"
+          @click="handleQCSyncSelect('validity')"
+        >
+          保存为有效性校验
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -944,6 +1108,25 @@ onUnmounted(() => {
   border-radius: 12px;
   padding: 20px 24px;
   border: 1px solid;
+}
+
+/*
+ * The extra wrapper exists only for E2E (data-testid). Element Plus form items
+ * lay out children with flex; ensure the wrapper expands so the input doesn't
+ * shrink.
+ */
+.testid-input-wrap {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0%;
+  min-width: 0;
+}
+
+.testid-input-wrap :deep(.validated-input) {
+  width: 100%;
+  flex: 1 1 0%;
+  min-width: 0;
 }
 
 /* Compact Header */
