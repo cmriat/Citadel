@@ -459,6 +459,15 @@ local_dir/
 - [x] 更新 robot_config 配置
 - [x] 更新对齐分析文档
 
+### 2.12.4 Episode 质量报告与溯源 ✅
+- [x] `detect_gap_segments()` 额外返回 gap 详情（camera, frame_index, gap_ms, skipped_reference_indices）
+- [x] `load_episode_v1_format()` 返回 quality metadata（相机帧数/中位帧间隔、裁剪帧数、跳帧详情）
+- [x] 每个 episode 转换后输出 `quality_report.json`
+- [x] 批量转换结束后汇总 `quality_summary.json` 到输出目录顶层
+- [x] CLI 透传 `--gap-factor` / `--min-segment-frames`，支持环境变量
+- [x] `gap_factor` 默认值从 5.0 调整为 4.5（容忍最多 3 帧丢失）
+- [x] Merge 时持久化 `meta/episode_mapping.json`（merged_index → source_dir，支持完整溯源）
+
 ### 数据分析结果（0203_qz2_pants, 158 episodes）
 - **跳帧分析**: 157/158 episodes 无跳帧，仅 episode_0060 有 1 处 gap（168ms，损失 1 帧）
 - **相机帧率**: cam_env ~31fps (32.02ms), 腕部相机 ~25fps (40.00ms)
@@ -719,7 +728,7 @@ local_dir/
 - v0.2.3: Bug修复与QC优化（配置同步、python-dotenv、18处bug修复、三相机并排布局）
 - v0.2.4: 前端代码质量优化（7处bug修复、防御性编程、类型优化、暗色主题改进）
 - v0.2.5: 数据质量与转换优化（转换工具增强、对齐分析重构、QC实时同步、robot_config多机器人支持）
-- v0.2.6: 转换管线健壮性增强（跳帧检测与片段切割、三相机视频对比工具、新数据集适配）
+- v0.2.6: 转换管线健壮性增强（跳帧检测与片段切割、三相机视频对比工具、新数据集适配、质量报告JSON、episode溯源映射）
 
 ### 规划中 ⏳
 - **阶段7**: UI/UX优化 → v0.3.0
@@ -862,10 +871,12 @@ local_dir/
 - ✅ **2026-02-11**: v0.2.6 发布 - 转换管线健壮性增强 🎉
   - **跳帧检测与片段切割**: `detect_gap_segments()` 自动检测严重跳帧，切割为有效片段
   - **三相机视频对比**: `visualize_video_sync.py` 并排拼接合成视频，帧号/相机名标注
+  - **质量报告**: 每个 episode 输出 `quality_report.json`，批量汇总 `quality_summary.json`
+  - **Episode 溯源**: Merge 时持久化 `episode_mapping.json`，支持 merged → lerobot → raw 反查
   - **新数据集适配**: 0203_qz2_pants 158 episodes（157 无跳帧，默认 linear 对齐）
   - **数据分析**: 确认三相机无系统性时间戳偏移
 
 ---
 
 **更新频率**: 每完成一个子任务更新一次
-**最后更新**: 2026-02-11 (v0.2.6 转换管线健壮性增强)
+**最后更新**: 2026-02-11 (v0.2.6 质量报告JSON + episode溯源映射)
