@@ -1665,6 +1665,21 @@ def merge_datasets(
         copy_images(source_folders, output_folder, episode_mapping)
     
 
+    # Save episode mapping for traceability (merged_index → source)
+    mapping_records = []
+    for folder, old_index, new_index in episode_mapping:
+        source_dir_name = os.path.basename(folder)
+        mapping_records.append({
+            "merged_index": new_index,
+            "source_dir": source_dir_name,
+            "source_episode_index": old_index,
+            "source_path": folder
+        })
+    mapping_path = os.path.join(output_folder, "meta", "episode_mapping.json")
+    with open(mapping_path, "w", encoding="utf-8") as f:
+        json.dump(mapping_records, f, indent=4, ensure_ascii=False)
+    print(f"Saved episode mapping to {mapping_path}")
+
     print(f"Merged {total_episodes} episodes with {total_frames} frames into {output_folder}")
 
 
