@@ -97,9 +97,10 @@ class ROIConfig:
         Returns:
             Dict with "y" and "x" ratio tuples
         """
-        if "wrist" in camera:
+        # Wrist cameras: contains "wrist" or is "handeye" (Franka wrist camera)
+        if "wrist" in camera or camera == "handeye":
             return {"y": self.wrist_y, "x": self.wrist_x}
-        elif any(env_name in camera for env_name in ["cam_env", "cam_high"]):
+        elif any(env_name in camera for env_name in ["cam_env", "cam_high", "main", "side"]):
             return {"y": self.env_y, "x": self.env_x}
         return {"y": self.full_y, "x": self.full_x}
 
@@ -251,6 +252,67 @@ GALAXEA_R1_LITE_CONFIG = RobotConfig(
     ),
 )
 
+# Franka single-arm robot configuration (for data with observation.images.xxx camera naming)
+# Note: Camera names should NOT include "observation.images." prefix - it's added by data_loader
+FRANKA_CONFIG = RobotConfig(
+    name="franka",
+    gripper=GripperConfig(
+        left_dim=7,  # Single gripper at dimension 7 (8th dimension, 0-indexed)
+        right_dim=7,  # Same as left since it's single arm
+        left_field="gripper",
+        right_field="gripper",
+    ),
+    camera=CameraConfig(
+        left_wrist="handeye",  # Will become "observation.images.handeye"
+        right_wrist="handeye",
+        env="main",
+        suffix="",
+    ),
+    video=VideoConfig(
+        fps=30.0,
+        resolution=(480, 640),
+        path_pattern="videos/chunk-{chunk:03d}/observation.images.{camera}/episode_{episode:06d}.mp4",
+    ),
+    roi=ROIConfig(
+        wrist_y=(0.60, 0.95),
+        wrist_x=(0.25, 0.75),
+        env_y=(0.30, 0.90),
+        env_x=(0.20, 0.80),
+        full_y=(0.40, 0.95),
+        full_x=(0.15, 0.85),
+    ),
+)
+
+# RoboTwin Agilex ALOHA simulation configuration
+ROBOTWIN_ALOHA_AGILEX_CONFIG = RobotConfig(
+    name="robotwin_aloha_agilex",
+    gripper=GripperConfig(
+        left_dim=6,  # left_gripper at index 6
+        right_dim=13,  # right_gripper at index 13
+        left_field="left_gripper",
+        right_field="right_gripper",
+    ),
+    camera=CameraConfig(
+        left_wrist="cam_left_wrist",
+        right_wrist="cam_right_wrist",
+        env="cam_high",
+        suffix="",
+    ),
+    video=VideoConfig(
+        fps=20.0,  # Simulation runs at 20 FPS
+        resolution=(480, 640),
+        path_pattern="videos/chunk-{chunk:03d}/observation.images.{camera}/episode_{episode:06d}.mp4",
+    ),
+    roi=ROIConfig(
+        wrist_y=(0.50, 1.00),  # Simulation may have different gripper positions
+        wrist_x=(0.20, 0.80),
+        env_y=(0.30, 0.90),
+        env_x=(0.10, 0.90),
+        full_y=(0.30, 0.90),
+        full_x=(0.10, 0.90),
+    ),
+)
+
 # Default configuration (used as fallback)
 DEFAULT_CONFIG = AIRBOT_PLAY_CONFIG
 
@@ -264,6 +326,8 @@ _ROBOT_REGISTRY: dict[str, RobotConfig] = {
     "airbot_play": AIRBOT_PLAY_CONFIG,
     "aloha": ALOHA_CONFIG,
     "galaxea_r1_lite": GALAXEA_R1_LITE_CONFIG,
+    "franka": FRANKA_CONFIG,
+    "robotwin_aloha_agilex": ROBOTWIN_ALOHA_AGILEX_CONFIG,
 }
 
 

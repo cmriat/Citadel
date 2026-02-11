@@ -12,7 +12,7 @@ Usage:
 
 import json
 from pathlib import Path
-from typing import Dict
+from typing import Dict, List, Tuple
 import h5py
 import numpy as np
 import pyarrow as pa
@@ -123,6 +123,100 @@ def align_data_to_reference(ref_timestamps, data, data_timestamps, data_name, me
     return aligned_data
 
 
+def detect_gap_segments(
+    reference_timestamps: np.ndarray,
+    cameras_info: Dict[str, np.ndarray],
+    gap_factor: float = 5.0,
+    min_segment_frames: int = 30
+) -> List[np.ndarray]:
+    """检测所有相机的严重跳帧，将 reference_timestamps 切割为有效片段。
+
+    Args:
+        reference_timestamps: 基准时间戳数组
+        cameras_info: {相机名: 时间戳数组}
+        gap_factor: 帧间隔超过 median_interval * gap_factor 视为跳帧
+        min_segment_frames: 最小有效片段帧数
+
+    Returns:
+        有效片段的 reference_timestamps 列表（每个元素是一个连续时间段的时间戳数组）
+        空列表表示整个 episode 不可用
+    """
+    # 1. 收集所有相机的跳帧区间
+    all_gap_intervals: List[Tuple[float, float]] = []
+
+    for cam_name, cam_ts in cameras_info.items():
+        if len(cam_ts) < 2:
+            continue
+        intervals = np.diff(cam_ts)
+        median_interval = np.median(intervals)
+        gap_threshold = median_interval * gap_factor
+
+        gap_indices = np.where(intervals > gap_threshold)[0]
+        for idx in gap_indices:
+            gap_start_ts = cam_ts[idx]
+            gap_end_ts = cam_ts[idx + 1]
+            gap_duration_ms = (gap_end_ts - gap_start_ts) / 1e6
+            print(f"  ⚡ {cam_name}: 跳帧 @ idx={idx}, 间隔={gap_duration_ms:.1f}ms "
+                  f"(阈值={gap_threshold/1e6:.1f}ms)")
+            all_gap_intervals.append((gap_start_ts, gap_end_ts))
+
+    # 无跳帧 → 返回完整时间戳
+    if not all_gap_intervals:
+        print("  ✅ 无严重跳帧，保留完整 episode")
+        return [reference_timestamps]
+
+    # 2. 合并重叠的跳帧区间（union）
+    all_gap_intervals.sort(key=lambda x: x[0])
+    merged: List[Tuple[float, float]] = [all_gap_intervals[0]]
+    for start, end in all_gap_intervals[1:]:
+        if start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+
+    # 3. 用跳帧区间切割 reference_timestamps
+    #    在跳帧区间内的参考帧全部丢弃，区间外的帧形成连续片段
+    segments: List[np.ndarray] = []
+    current_mask = np.ones(len(reference_timestamps), dtype=bool)
+
+    for gap_start, gap_end in merged:
+        # 标记落在跳帧区间内的参考帧为无效
+        in_gap = (reference_timestamps >= gap_start) & (reference_timestamps <= gap_end)
+        current_mask &= ~in_gap
+
+    # 从有效帧中提取连续片段
+    valid_indices = np.where(current_mask)[0]
+    if len(valid_indices) == 0:
+        print("  ❌ 所有帧均在跳帧区间内，episode 不可用")
+        return []
+
+    # 检测连续索引的断点（非连续处即为切割点）
+    breaks = np.where(np.diff(valid_indices) > 1)[0] + 1
+    index_groups = np.split(valid_indices, breaks)
+
+    for group in index_groups:
+        seg_ts = reference_timestamps[group]
+        segments.append(seg_ts)
+
+    # 4. 过滤掉帧数不足的片段
+    valid_segments = []
+    for i, seg in enumerate(segments):
+        if len(seg) >= min_segment_frames:
+            valid_segments.append(seg)
+        else:
+            print(f"  🗑️  片段 {i}: {len(seg)} 帧 < {min_segment_frames} 帧阈值，丢弃")
+
+    # 5. 打印切割报告
+    print(f"\n  📊 跳帧切割报告:")
+    print(f"     检测到 {len(merged)} 个跳帧区间")
+    print(f"     切割为 {len(segments)} 个片段，有效 {len(valid_segments)} 个")
+    for i, seg in enumerate(valid_segments):
+        duration_s = (seg[-1] - seg[0]) / 1e9
+        print(f"     片段 {i}: {len(seg)} 帧, {duration_s:.2f}s")
+
+    return valid_segments
+
+
 def map_master_eef_to_slave_mapping(master_eef: np.ndarray, slave_mapping_stats: dict) -> np.ndarray:
     """将master的eef_gripper_joint_pos映射到slave的gripper_mapping_controller_pos范围
 
@@ -154,8 +248,16 @@ def map_master_eef_to_slave_mapping(master_eef: np.ndarray, slave_mapping_stats:
     return mapped
 
 
-def load_episode_v1_format(ep_path: Path, alignment_method: str = 'nearest') -> Dict:
-    """加载online_test_hdf5_v1格式的Episode数据
+def load_episode_v1_format(
+    ep_path: Path,
+    alignment_method: str = 'nearest',
+    gap_factor: float = 5.0,
+    min_segment_frames: int = 30
+) -> List[Dict]:
+    """加载online_test_hdf5_v1格式的Episode数据，支持跳帧切割
+
+    当某相机出现严重跳帧时，在跳帧处切割 episode，保留所有有效片段
+    作为独立的 sub-episode 输出，最大化真机数据利用率。
 
     数据格式:
         images/cam_env/frames_jpeg - JPEG压缩图像
@@ -165,15 +267,19 @@ def load_episode_v1_format(ep_path: Path, alignment_method: str = 'nearest') -> 
     Args:
         ep_path: HDF5文件路径
         alignment_method: 对齐方法 - 'nearest' (最近邻) 或 'linear' (线性插值)
+        gap_factor: 跳帧判定倍数，帧间隔 > 正常间隔 × gap_factor 视为严重跳帧
+        min_segment_frames: 最小有效片段帧数，低于此阈值丢弃
 
     Returns:
+        有效片段列表，每个元素为:
         {
             'images_env': [N, H, W, 3] uint8,
             'images_left_wrist': [N, H, W, 3] uint8,
             'images_right_wrist': [N, H, W, 3] uint8,
-            'state': [N, 16] float32,
-            'action': [N, 16] float32
+            'state': [N, 14] float32,
+            'action': [N, 14] float32
         }
+        空列表表示整个 episode 不可用
     """
     with h5py.File(ep_path, "r") as f:
         # ========== 1. 确定参考基准时间戳 (最少帧数相机) ==========
@@ -193,22 +299,33 @@ def load_episode_v1_format(ep_path: Path, alignment_method: str = 'nearest') -> 
         # ========== 1.5 自适应边界裁剪 ==========
         print("\n✂️  自适应边界裁剪:")
 
-        # 预读关节时间戳以计算边界
-        left_joint_sec_pre = f["joints/left_slave/timestamp_sec"][:]
-        left_joint_nsec_pre = f["joints/left_slave/timestamp_nanosec"][:]
-        joint_timestamps_preview = left_joint_sec_pre * 1e9 + left_joint_nsec_pre
+        # 预读所有关节数据源的时间戳以计算边界
+        joint_groups = ["joints/left_slave", "joints/right_slave"]
+        has_master = "left_master" in f["joints"]
+        if has_master:
+            joint_groups += ["joints/left_master", "joints/right_master"]
 
-        # 计算头帧时延（图像相对于关节的固有延迟）
+        all_joint_end_ts = []
+        for grp in joint_groups:
+            sec = f[f"{grp}/timestamp_sec"][:]
+            nsec = f[f"{grp}/timestamp_nanosec"][:]
+            ts = sec * 1e9 + nsec
+            all_joint_end_ts.append(ts[-1])
+
+        # 用 left_slave 计算头帧时延（估算图像与关节的固有延迟）
+        left_slave_ts = (f["joints/left_slave/timestamp_sec"][:] * 1e9
+                         + f["joints/left_slave/timestamp_nanosec"][:])
         img_first_ts = reference_timestamps[0]
-        joint_nearest_idx = np.argmin(np.abs(joint_timestamps_preview - img_first_ts))
-        joint_nearest_ts = joint_timestamps_preview[joint_nearest_idx]
+        joint_nearest_idx = np.argmin(np.abs(left_slave_ts - img_first_ts))
+        joint_nearest_ts = left_slave_ts[joint_nearest_idx]
         head_delay_ns = img_first_ts - joint_nearest_ts
         head_delay_ms = head_delay_ns / 1e6
 
         print(f"  头帧时延: {head_delay_ms:+.2f} ms (图像{'晚于' if head_delay_ns >= 0 else '早于'}关节)")
 
-        # 计算结束边界容忍阈值
-        joint_end_ts = joint_timestamps_preview[-1]
+        # 取所有关节源中最早结束的时间戳，确保所有数据源都有覆盖
+        joint_end_ts = min(all_joint_end_ts)
+        print(f"  关节数据源: {len(joint_groups)} 组, 最早结束: {joint_end_ts/1e9:.3f}s")
         tolerance_end_ts = joint_end_ts + abs(head_delay_ns)  # 使用绝对值，确保容忍度为正
 
         # 计算基准相机的有效帧掩码
@@ -231,171 +348,167 @@ def load_episode_v1_format(ep_path: Path, alignment_method: str = 'nearest') -> 
             print(f"  保留帧数: {N_frames} / {N_frames_original}")
         else:
             N_frames = N_frames_original
-            valid_mask = None  # 无需裁剪
             print(f"  无需裁剪，所有 {N_frames_original} 帧在容忍度内")
 
-        # ========== 2. 解码并对齐图像 ==========
-        print("\n📸 图像对齐:")
+        # ========== 1.6 跳帧切割 ==========
+        print("\n🔍 跳帧检测:")
+        segments = detect_gap_segments(
+            reference_timestamps, cameras_info,
+            gap_factor=gap_factor,
+            min_segment_frames=min_segment_frames
+        )
 
-        # cam_env
+        if not segments:
+            print("\n❌ Episode 无有效片段")
+            return []
+
+        # ========== 2. 全量解码图像（只做一次） ==========
+        print("\n📸 图像解码:")
         images_env_raw = decode_jpeg_frames(f, "cam_env")
-        if min_camera != 'cam_env':
-            images_env = align_data_to_reference(
-                reference_timestamps,
-                images_env_raw,
-                cameras_info['cam_env'],
-                'cam_env',
-                method='nearest'  # 图像对齐始终使用最近邻
-            )
-        else:
-            # 基准相机：如果有裁剪，应用 valid_mask
-            if valid_mask is not None:
-                images_env = images_env_raw[valid_mask]
-            else:
-                images_env = images_env_raw
-            print(f"  cam_env: 无需对齐 (基准相机)")
-
-        # cam_left_wrist
+        print(f"  cam_env: {images_env_raw.shape}")
         images_left_raw = decode_jpeg_frames(f, "cam_left_wrist")
-        if min_camera != 'cam_left_wrist':
-            images_left = align_data_to_reference(
-                reference_timestamps,
-                images_left_raw,
-                cameras_info['cam_left_wrist'],
-                'cam_left_wrist',
-                method='nearest'  # 图像对齐始终使用最近邻
-            )
-        else:
-            # 基准相机：如果有裁剪，应用 valid_mask
-            if valid_mask is not None:
-                images_left = images_left_raw[valid_mask]
-            else:
-                images_left = images_left_raw
-            print(f"  cam_left_wrist: 无需对齐 (基准相机)")
-
-        # cam_right_wrist
+        print(f"  cam_left_wrist: {images_left_raw.shape}")
         images_right_raw = decode_jpeg_frames(f, "cam_right_wrist")
-        if min_camera != 'cam_right_wrist':
-            images_right = align_data_to_reference(
-                reference_timestamps,
-                images_right_raw,
-                cameras_info['cam_right_wrist'],
-                'cam_right_wrist',
-                method='nearest'  # 图像对齐始终使用最近邻
-            )
-        else:
-            # 基准相机：如果有裁剪，应用 valid_mask
-            if valid_mask is not None:
-                images_right = images_right_raw[valid_mask]
-            else:
-                images_right = images_right_raw
-            print(f"  cam_right_wrist: 无需对齐 (基准相机)")
+        print(f"  cam_right_wrist: {images_right_raw.shape}")
 
-        # ========== 3. 读取关节数据 (slave) ==========
-        print("\n🦾 关节对齐:")
-
-        # 3.1 读取left slave数据
+        # ========== 3. 读取全量关节原始数据（只做一次） ==========
+        # 3.1 left slave
         left_joints_raw = reconstruct_joint_vector(f["joints/left_slave"], 6)
         left_gripper_raw = f["joints/left_slave/gripper_mapping_controller_pos"][:][:, np.newaxis]
-
-        # 3.2 读取left slave时间戳
         left_joint_sec = f["joints/left_slave/timestamp_sec"][:]
         left_joint_nsec = f["joints/left_slave/timestamp_nanosec"][:]
         left_joint_timestamps = left_joint_sec * 1e9 + left_joint_nsec
 
-        # 3.3 读取right slave数据
+        # 3.2 right slave
         right_joints_raw = reconstruct_joint_vector(f["joints/right_slave"], 6)
         right_gripper_raw = f["joints/right_slave/gripper_mapping_controller_pos"][:][:, np.newaxis]
-
-        # 3.4 读取right slave时间戳
         right_joint_sec = f["joints/right_slave/timestamp_sec"][:]
         right_joint_nsec = f["joints/right_slave/timestamp_nanosec"][:]
         right_joint_timestamps = right_joint_sec * 1e9 + right_joint_nsec
 
-        # 3.5 对齐关节数据到基准时间戳（各自使用自己的时间戳）
-        left_joints = align_data_to_reference(reference_timestamps, left_joints_raw, left_joint_timestamps, 'left_joints', method=alignment_method)
-        left_gripper = align_data_to_reference(reference_timestamps, left_gripper_raw, left_joint_timestamps, 'left_gripper', method=alignment_method)
-        right_joints = align_data_to_reference(reference_timestamps, right_joints_raw, right_joint_timestamps, 'right_joints', method=alignment_method)
-        right_gripper = align_data_to_reference(reference_timestamps, right_gripper_raw, right_joint_timestamps, 'right_gripper', method=alignment_method)
-
-        # ========== 4. 组装State (16维) ==========
-        state = np.concatenate([
-            left_joints,   # [N, 6]
-            left_gripper,  # [N, 1]
-            right_joints,  # [N, 6]
-            right_gripper  # [N, 1]
-        ], axis=1).astype(np.float32)  # [N, 16]
-
-        # ========== 5. 组装Action (16维) ==========
-        if "left_master" in f["joints"]:
-            print("\n🎮 动作对齐:")
-
-            # 读取left master数据
+        # 3.3 master（如果存在）
+        if has_master:
             left_joints_cmd_raw = reconstruct_joint_vector(f["joints/left_master"], 6)
             left_gripper_cmd_raw = f["joints/left_master/eef_gripper_joint_pos"][:][:, np.newaxis]
-
-            # 获取left slave mapping统计信息用于映射
             left_slave_mapping = f["joints/left_slave/gripper_mapping_controller_pos"][:]
-            left_mapping_stats = {
-                'min': left_slave_mapping.min(),
-                'max': left_slave_mapping.max()
-            }
-
-            # 读取left master时间戳
+            left_mapping_stats = {'min': left_slave_mapping.min(), 'max': left_slave_mapping.max()}
             left_cmd_sec = f["joints/left_master/timestamp_sec"][:]
             left_cmd_nsec = f["joints/left_master/timestamp_nanosec"][:]
             left_cmd_timestamps = left_cmd_sec * 1e9 + left_cmd_nsec
 
-            # 读取right master数据
             right_joints_cmd_raw = reconstruct_joint_vector(f["joints/right_master"], 6)
             right_gripper_cmd_raw = f["joints/right_master/eef_gripper_joint_pos"][:][:, np.newaxis]
-
-            # 获取right slave mapping统计信息用于映射
             right_slave_mapping = f["joints/right_slave/gripper_mapping_controller_pos"][:]
-            right_mapping_stats = {
-                'min': right_slave_mapping.min(),
-                'max': right_slave_mapping.max()
-            }
-
-            # 读取right master时间戳
+            right_mapping_stats = {'min': right_slave_mapping.min(), 'max': right_slave_mapping.max()}
             right_cmd_sec = f["joints/right_master/timestamp_sec"][:]
             right_cmd_nsec = f["joints/right_master/timestamp_nanosec"][:]
             right_cmd_timestamps = right_cmd_sec * 1e9 + right_cmd_nsec
 
-            # 对齐到基准时间戳
-            left_joints_cmd = align_data_to_reference(reference_timestamps, left_joints_cmd_raw, left_cmd_timestamps, 'left_joints_cmd', method=alignment_method)
-            left_gripper_cmd_aligned = align_data_to_reference(reference_timestamps, left_gripper_cmd_raw, left_cmd_timestamps, 'left_gripper_cmd', method=alignment_method)
-            right_joints_cmd = align_data_to_reference(reference_timestamps, right_joints_cmd_raw, right_cmd_timestamps, 'right_joints_cmd', method=alignment_method)
-            right_gripper_cmd_aligned = align_data_to_reference(reference_timestamps, right_gripper_cmd_raw, right_cmd_timestamps, 'right_gripper_cmd', method=alignment_method)
+        # ========== 4. 对每个 segment 独立执行对齐和组装 ==========
+        results: List[Dict] = []
 
-            # 映射夹爪值到slave mapping范围
-            left_gripper_cmd = map_master_eef_to_slave_mapping(left_gripper_cmd_aligned, left_mapping_stats)
-            right_gripper_cmd = map_master_eef_to_slave_mapping(right_gripper_cmd_aligned, right_mapping_stats)
+        for seg_idx, seg_timestamps in enumerate(segments):
+            seg_label = f"片段 {seg_idx}" if len(segments) > 1 else "完整 episode"
+            print(f"\n{'='*60}")
+            print(f"📦 处理 {seg_label} ({len(seg_timestamps)} 帧)")
+            print(f"{'='*60}")
 
-            print(f"  ✓ 夹爪映射: master_eef -> slave_mapping 范围")
+            # 4.1 图像对齐
+            print("\n📸 图像对齐:")
+            seg_images_env = align_data_to_reference(
+                seg_timestamps, images_env_raw, cameras_info['cam_env'],
+                'cam_env', method='nearest'
+            )
+            seg_images_left = align_data_to_reference(
+                seg_timestamps, images_left_raw, cameras_info['cam_left_wrist'],
+                'cam_left_wrist', method='nearest'
+            )
+            seg_images_right = align_data_to_reference(
+                seg_timestamps, images_right_raw, cameras_info['cam_right_wrist'],
+                'cam_right_wrist', method='nearest'
+            )
 
-            action = np.concatenate([
-                left_joints_cmd,
-                left_gripper_cmd,
-                right_joints_cmd,
-                right_gripper_cmd
+            # 4.2 关节对齐
+            print("\n🦾 关节对齐:")
+            seg_left_joints = align_data_to_reference(
+                seg_timestamps, left_joints_raw, left_joint_timestamps,
+                'left_joints', method=alignment_method
+            )
+            seg_left_gripper = align_data_to_reference(
+                seg_timestamps, left_gripper_raw, left_joint_timestamps,
+                'left_gripper', method=alignment_method
+            )
+            seg_right_joints = align_data_to_reference(
+                seg_timestamps, right_joints_raw, right_joint_timestamps,
+                'right_joints', method=alignment_method
+            )
+            seg_right_gripper = align_data_to_reference(
+                seg_timestamps, right_gripper_raw, right_joint_timestamps,
+                'right_gripper', method=alignment_method
+            )
+
+            # 4.3 组装 State (14维)
+            state = np.concatenate([
+                seg_left_joints,   # [N, 6]
+                seg_left_gripper,  # [N, 1]
+                seg_right_joints,  # [N, 6]
+                seg_right_gripper  # [N, 1]
             ], axis=1).astype(np.float32)
 
-            print("\n✅ 使用master数据作为action (夹爪已映射)")
-        else:
-            action = state.copy()
-            print("\n⚠️  警告: master数据不存在，复制slave作为action")
+            # 4.4 组装 Action (14维)
+            if has_master:
+                print("\n🎮 动作对齐:")
+                seg_left_joints_cmd = align_data_to_reference(
+                    seg_timestamps, left_joints_cmd_raw, left_cmd_timestamps,
+                    'left_joints_cmd', method=alignment_method
+                )
+                seg_left_gripper_cmd_aligned = align_data_to_reference(
+                    seg_timestamps, left_gripper_cmd_raw, left_cmd_timestamps,
+                    'left_gripper_cmd', method=alignment_method
+                )
+                seg_right_joints_cmd = align_data_to_reference(
+                    seg_timestamps, right_joints_cmd_raw, right_cmd_timestamps,
+                    'right_joints_cmd', method=alignment_method
+                )
+                seg_right_gripper_cmd_aligned = align_data_to_reference(
+                    seg_timestamps, right_gripper_cmd_raw, right_cmd_timestamps,
+                    'right_gripper_cmd', method=alignment_method
+                )
 
-        # ========== 6. 返回对齐后的数据 ==========
-        print(f"\n✅ 数据加载完成: {N_frames}帧\n")
+                seg_left_gripper_cmd = map_master_eef_to_slave_mapping(
+                    seg_left_gripper_cmd_aligned, left_mapping_stats
+                )
+                seg_right_gripper_cmd = map_master_eef_to_slave_mapping(
+                    seg_right_gripper_cmd_aligned, right_mapping_stats
+                )
 
-        return {
-            'images_env': images_env,
-            'images_left_wrist': images_left,
-            'images_right_wrist': images_right,
-            'state': state,
-            'action': action
-        }
+                print(f"  ✓ 夹爪映射: master_eef -> slave_mapping 范围")
+
+                action = np.concatenate([
+                    seg_left_joints_cmd,
+                    seg_left_gripper_cmd,
+                    seg_right_joints_cmd,
+                    seg_right_gripper_cmd
+                ], axis=1).astype(np.float32)
+
+                print(f"  ✅ 使用master数据作为action (夹爪已映射)")
+            else:
+                action = state.copy()
+                print(f"\n  ⚠️  警告: master数据不存在，复制slave作为action")
+
+            results.append({
+                'images_env': seg_images_env,
+                'images_left_wrist': seg_images_left,
+                'images_right_wrist': seg_images_right,
+                'state': state,
+                'action': action
+            })
+
+        # ========== 5. 汇总报告 ==========
+        total_frames = sum(len(r['state']) for r in results)
+        print(f"\n✅ 数据加载完成: {len(results)} 个片段, 共 {total_frames} 帧\n")
+
+        return results
 
 
 def encode_video_frames(frames: np.ndarray, output_path: Path, fps: int = 30):
@@ -462,6 +575,7 @@ def create_output_structure(output_dir: Path):
 def generate_info_json(
     output_dir: Path,
     total_frames: int,
+    total_episodes: int,
     fps: int,
     robot_type: str,
     dataset_name: str,
@@ -472,15 +586,15 @@ def generate_info_json(
     info = {
         "codebase_version": "v2.1",
         "robot_type": robot_type,
-        "total_episodes": 1,
+        "total_episodes": total_episodes,
         "total_frames": total_frames,
         "total_tasks": 1,
-        "total_videos": 3,
+        "total_videos": 3 * total_episodes,
         "total_chunks": 1,
         "chunks_size": 1000,
         "fps": fps,
         "splits": {
-            "train": "0:1"
+            "train": f"0:{total_episodes}"
         },
         "data_path": "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet",
         "video_path": "videos/chunk-{episode_chunk:03d}/{video_key}/episode_{episode_index:06d}.mp4",
@@ -517,7 +631,7 @@ def generate_info_json(
                     "video.height": image_height,
                     "video.width": image_width,
                     "video.codec": "libx264",
-                    "video.pix_fmt": "rgb24",
+                    "video.pix_fmt": "yuv420p",
                     "video.is_depth_map": False,
                     "video.fps": fps,
                     "video.channels": 3,
@@ -532,7 +646,7 @@ def generate_info_json(
                     "video.height": image_height,
                     "video.width": image_width,
                     "video.codec": "libx264",
-                    "video.pix_fmt": "rgb24",
+                    "video.pix_fmt": "yuv420p",
                     "video.is_depth_map": False,
                     "video.fps": fps,
                     "video.channels": 3,
@@ -547,7 +661,7 @@ def generate_info_json(
                     "video.height": image_height,
                     "video.width": image_width,
                     "video.codec": "libx264",
-                    "video.pix_fmt": "rgb24",
+                    "video.pix_fmt": "yuv420p",
                     "video.is_depth_map": False,
                     "video.fps": fps,
                     "video.channels": 3,
@@ -598,14 +712,21 @@ def generate_tasks_jsonl(output_dir: Path, task: str):
         f.write(json.dumps({"task_index": 0, "task": task}) + "\n")
 
 
-def generate_episodes_jsonl(output_dir: Path, num_frames: int, task: str):
-    """Generate episodes.jsonl metadata file in meta/ directory."""
+def generate_episodes_jsonl(output_dir: Path, episodes_info: List[Dict], task: str):
+    """Generate episodes.jsonl metadata file in meta/ directory.
+
+    Args:
+        output_dir: 输出目录
+        episodes_info: [{'episode_index': int, 'num_frames': int}, ...]
+        task: 任务描述
+    """
     with open(output_dir / "meta" / "episodes.jsonl", "w") as f:
-        f.write(json.dumps({
-            "episode_index": 0,
-            "tasks": [task],  # Task names as strings, not indices
-            "length": num_frames
-        }) + "\n")
+        for ep_info in episodes_info:
+            f.write(json.dumps({
+                "episode_index": ep_info['episode_index'],
+                "tasks": [task],
+                "length": ep_info['num_frames']
+            }) + "\n")
 
 
 def compute_episode_stats(episode_data: Dict, episode_index: int, fps: int) -> Dict:
@@ -723,9 +844,14 @@ def convert_hdf5_to_lerobot_v21(
     robot_type: str = "limx Tron2",
     fps: int = 30,
     task: str = "Fold the laundry",
-    alignment_method: str = "nearest"
+    alignment_method: str = "nearest",
+    gap_factor: float = 5.0,
+    min_segment_frames: int = 30
 ):
     """Convert HDF5 episode to LeRobot v2.1 format.
+
+    支持跳帧切割：当某相机出现严重跳帧时，在跳帧处切割 episode，
+    保留所有有效片段作为独立的 sub-episode 输出。
 
     Args:
         hdf5_path: HDF5文件路径
@@ -734,81 +860,96 @@ def convert_hdf5_to_lerobot_v21(
         fps: 视频帧率
         task: 任务描述
         alignment_method: 对齐方法 - 'nearest' (最近邻) 或 'linear' (线性插值)
+        gap_factor: 跳帧判定倍数，帧间隔 > 正常间隔 × gap_factor 视为严重跳帧
+        min_segment_frames: 最小有效片段帧数，低于此阈值丢弃
     """
     dataset_name = output_dir.name
     print(f"Converting {hdf5_path} to LeRobot v2.1 format...")
     print(f"Output directory: {output_dir}")
     print(f"Dataset name: {dataset_name}")
     print(f"Alignment method: {alignment_method}")
+    print(f"Gap detection: factor={gap_factor}, min_frames={min_segment_frames}")
 
     # 1. Create output directory structure
     create_output_structure(output_dir)
 
-    # 2. Load HDF5 data
+    # 2. Load HDF5 data (returns list of segments)
     print("\nLoading HDF5 data...")
-    episode_data = load_episode_v1_format(hdf5_path, alignment_method=alignment_method)
-    num_frames = len(episode_data['state'])
-    print(f"Loaded {num_frames} frames")
-    print(f"  State shape: {episode_data['state'].shape}")
-    print(f"  Action shape: {episode_data['action'].shape}")
+    segments = load_episode_v1_format(
+        hdf5_path,
+        alignment_method=alignment_method,
+        gap_factor=gap_factor,
+        min_segment_frames=min_segment_frames
+    )
 
-    # 3. Encode videos
-    print("\nEncoding videos...")
-    for cam_key in ['cam_env', 'cam_left_wrist', 'cam_right_wrist']:
-        video_path = output_dir / "videos" / "chunk-000" / \
-                     f"observation.images.{cam_key}" / "episode_000000.mp4"
+    if not segments:
+        print("\n⚠️  Episode 无有效片段，跳过")
+        return
 
-        images_key = f"images_{cam_key.replace('cam_', '')}"
-        print(f"  Encoding {cam_key}... ", end="", flush=True)
-        encode_video_frames(episode_data[images_key], video_path, fps)
-        print(f"✓ {video_path.stat().st_size / 1024 / 1024:.1f} MB")
+    num_episodes = len(segments)
+    total_frames = sum(len(seg['state']) for seg in segments)
+    print(f"\nLoaded {num_episodes} segment(s), {total_frames} total frames")
 
-    # 4. Generate Parquet data file
-    print("\nGenerating Parquet data file...")
-    parquet_path = output_dir / "data" / "chunk-000" / "episode_000000.parquet"
-    create_episode_parquet(episode_data, parquet_path, episode_index=0, fps=fps)
-    print(f"  ✓ {parquet_path}")
+    # 3. 为每个 segment 输出独立的 episode 文件
+    episodes_info = []
+    all_stats = []
 
-    # 5. Generate metadata files in meta/ directory
+    for ep_idx, episode_data in enumerate(segments):
+        num_frames = len(episode_data['state'])
+        ep_tag = f"episode_{ep_idx:06d}"
+        print(f"\n{'='*60}")
+        print(f"📦 输出 {ep_tag} ({num_frames} 帧)")
+        print(f"{'='*60}")
+
+        # 3.1 Encode videos
+        print("  Encoding videos...")
+        for cam_key in ['cam_env', 'cam_left_wrist', 'cam_right_wrist']:
+            video_path = output_dir / "videos" / "chunk-000" / \
+                         f"observation.images.{cam_key}" / f"{ep_tag}.mp4"
+
+            images_key = f"images_{cam_key.replace('cam_', '')}"
+            print(f"    {cam_key}... ", end="", flush=True)
+            encode_video_frames(episode_data[images_key], video_path, fps)
+            print(f"✓ {video_path.stat().st_size / 1024 / 1024:.1f} MB")
+
+        # 3.2 Generate Parquet data file
+        parquet_path = output_dir / "data" / "chunk-000" / f"{ep_tag}.parquet"
+        create_episode_parquet(episode_data, parquet_path, episode_index=ep_idx, fps=fps)
+        print(f"  ✓ {parquet_path}")
+
+        # 3.3 Compute episode statistics
+        stats = compute_episode_stats(episode_data, episode_index=ep_idx, fps=fps)
+        all_stats.append(stats)
+
+        episodes_info.append({
+            'episode_index': ep_idx,
+            'num_frames': num_frames
+        })
+
+    # 4. Generate metadata files
     print("\nGenerating metadata files...")
-    # Get actual image dimensions from loaded data
-    image_height = episode_data['images_env'].shape[1]
-    image_width = episode_data['images_env'].shape[2]
-    generate_info_json(output_dir, num_frames, fps, robot_type, dataset_name,
+    image_height = segments[0]['images_env'].shape[1]
+    image_width = segments[0]['images_env'].shape[2]
+    generate_info_json(output_dir, total_frames, num_episodes, fps, robot_type, dataset_name,
                        image_height=image_height, image_width=image_width)
     print("  ✓ meta/info.json")
 
     generate_tasks_jsonl(output_dir, task)
     print("  ✓ meta/tasks.jsonl")
 
-    generate_episodes_jsonl(output_dir, num_frames, task)
+    generate_episodes_jsonl(output_dir, episodes_info, task)
     print("  ✓ meta/episodes.jsonl")
 
-    # 6. Compute and generate episode statistics
-    print("\nComputing episode statistics...")
-    stats = compute_episode_stats(episode_data, episode_index=0, fps=fps)
-    generate_episodes_stats_jsonl(output_dir, [stats])
+    generate_episodes_stats_jsonl(output_dir, all_stats)
     print("  ✓ meta/episodes_stats.jsonl")
 
     print(f"\n✅ Conversion complete!")
-    print(f"   Episode location: {output_dir}")
-    print(f"   Frames: {num_frames}")
-    print(f"   Videos: 3")
-    print(f"\nDirectory structure:")
-    print(f"  {output_dir.name}/")
-    print(f"  ├── meta/")
-    print(f"  │   ├── info.json")
-    print(f"  │   ├── tasks.jsonl")
-    print(f"  │   ├── episodes.jsonl")
-    print(f"  │   └── episodes_stats.jsonl")
-    print(f"  ├── data/")
-    print(f"  │   └── chunk-000/")
-    print(f"  │       └── episode_000000.parquet")
-    print(f"  └── videos/")
-    print(f"      └── chunk-000/")
-    print(f"          ├── observation.images.cam_env/")
-    print(f"          ├── observation.images.cam_left_wrist/")
-    print(f"          └── observation.images.cam_right_wrist/")
+    print(f"   Output: {output_dir}")
+    print(f"   Episodes: {num_episodes}")
+    print(f"   Total frames: {total_frames}")
+    for ep_info in episodes_info:
+        print(f"     episode_{ep_info['episode_index']:06d}: {ep_info['num_frames']} frames")
+    print(f"   Videos: {3 * num_episodes}")
 
 
 def main(
@@ -817,7 +958,9 @@ def main(
     robot_type: str = "limx Tron2",
     fps: int = 30,
     task: str = "Fold the laundry",
-    alignment_method: str = "nearest"
+    alignment_method: str = "nearest",
+    gap_factor: float = 5.0,
+    min_segment_frames: int = 30
 ):
     """Main entry point.
 
@@ -828,8 +971,13 @@ def main(
         fps: 视频帧率
         task: 任务描述
         alignment_method: 关节对齐方法 - 'nearest' (最近邻) 或 'linear' (线性插值)
+        gap_factor: 跳帧判定倍数，帧间隔 > 正常间隔 × gap_factor 视为严重跳帧
+        min_segment_frames: 最小有效片段帧数，低于此阈值丢弃
     """
-    convert_hdf5_to_lerobot_v21(hdf5_path, output_dir, robot_type, fps, task, alignment_method)
+    convert_hdf5_to_lerobot_v21(
+        hdf5_path, output_dir, robot_type, fps, task,
+        alignment_method, gap_factor, min_segment_frames
+    )
 
 
 if __name__ == "__main__":

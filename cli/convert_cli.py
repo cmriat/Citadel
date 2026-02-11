@@ -111,8 +111,8 @@ def convert_single_file(
 
 
 def convert(
-    input_dir: str = "/pfs/pfs-uaDOJM/home/maozan/data/1229_qz2/raw_fixed/",
-    output_dir: str = "/pfs/pfs-uaDOJM/home/maozan/data/1229_qz2/lerobot/",
+    input_dir: str = "/pfs/pfs-uaDOJM/home/maozan/code/data/0203_qz2_pants/raw",
+    output_dir: str = "/pfs/pfs-uaDOJM/home/maozan/code/data/0203_qz2_pants/lerobot",
     robot_type: Optional[str] = None,
     fps: Optional[int] = None,
     task: Optional[str] = None,
@@ -146,7 +146,7 @@ def convert(
     if file_pattern is None:
         file_pattern = _get_env("DEFAULT_FILE_PATTERN", "episode_*.h5")
     if alignment_method is None:
-        alignment_method = _get_env("DEFAULT_ALIGNMENT_METHOD", "nearest")
+        alignment_method = _get_env("DEFAULT_ALIGNMENT_METHOD", "linear")
 
     print("=" * 80)
     print(colored("🔄 HDF5批量转换工具 - Citadel Release", "cyan", attrs=["bold"]))

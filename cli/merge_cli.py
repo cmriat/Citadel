@@ -40,8 +40,8 @@ from scripts.merge_lerobot import merge_datasets
 
 
 def merge(
-    sources: list[str] = ["/pfs/pfs-uaDOJM/home/maozan/data/1229_qz2/lerobot_linear/episode_*"],
-    output: str = "/pfs/pfs-uaDOJM/home/maozan/data/1229_qz2/merged_linear/",
+    sources: list[str] = ["/pfs/pfs-uaDOJM/home/maozan/code/data/0203_qz2_pants/lerobot/episode_*"],
+    output: str = "/pfs/pfs-uaDOJM/home/maozan/code/data/0203_qz2_pants/merged",
     state_max_dim: int = 14,
     action_max_dim: int = 14,
     fps: int = 25,
